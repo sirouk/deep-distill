@@ -37,20 +37,54 @@ def log(*a): print(*a, file=sys.stderr)
 def slug(i): return f"{i:02d}"
 
 def ensure_pymupdf():
-    try:
-        import fitz; return fitz
-    except ImportError:
-        log("PyMuPDF missing -> pip install --user pymupdf ...")
-        import subprocess
-        subprocess.run([sys.executable, "-m", "pip", "install", "--user",
-                        "--quiet", "pymupdf"], check=False)
-        import site
+    """Import PyMuPDF, installing it if needed — robust to PEP 668 'externally-managed'
+    Pythons (Homebrew, Debian/Ubuntu). Tries, in order: already-importable -> user install
+    -> user install w/ --break-system-packages -> an isolated cached venv. The script self-heals
+    so no agent has to improvise an environment fix."""
+    import subprocess, site, importlib, glob, os
+    py = sys.executable
+
+    def _try_import():
+        try:
+            importlib.invalidate_caches()
+            import fitz; return fitz
+        except ImportError:
+            return None
+
+    got = _try_import()
+    if got:
+        return got
+
+    # 1) user-site install (plain, then with the PEP 668 escape hatch — both stay in ~/.local)
+    for extra in ([], ["--break-system-packages"]):
+        log(f"PyMuPDF missing -> pip install --user {' '.join(extra)} pymupdf ...")
+        subprocess.run([py, "-m", "pip", "install", "--user", "--quiet", *extra, "pymupdf"],
+                       check=False)
         usp = site.getusersitepackages()
         if usp not in sys.path:
             sys.path.append(usp)
-        import importlib
-        importlib.invalidate_caches()
-        import fitz; return fitz
+        got = _try_import()
+        if got:
+            return got
+
+    # 2) isolated venv fallback (clean on externally-managed systems; cached for reuse)
+    venv = os.path.join(os.environ.get("TMPDIR", "/tmp"), "deep-distill-venv")
+    log(f"falling back to an isolated venv at {venv} ...")
+    if not os.path.isdir(venv):
+        subprocess.run([py, "-m", "venv", venv], check=False)
+    vpy = os.path.join(venv, "bin", "python")
+    subprocess.run([vpy, "-m", "pip", "install", "--quiet", "pymupdf"], check=False)
+    for sp in glob.glob(os.path.join(venv, "lib", "python*", "site-packages")):
+        if sp not in sys.path:
+            sys.path.insert(0, sp)
+    got = _try_import()
+    if got:
+        return got
+
+    raise RuntimeError(
+        "Could not install PyMuPDF automatically. Install it manually, e.g.:\n"
+        "  python3 -m pip install --user --break-system-packages pymupdf\n"
+        "or in a venv, then re-run this script.")
 
 def write_section(ws, sid, title, text):
     p = ws / "text" / f"{sid}.txt"
