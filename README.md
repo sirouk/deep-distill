@@ -111,16 +111,17 @@ git clone https://github.com/sirouk/deep-distill ~/.claude/skills/deep-distill  
 | Agent | Skills directory | Notes |
 |---|---|---|
 | **Claude Code** | `~/.claude/skills/deep-distill` | Full parallel, faithfulness-gated federation via the `Workflow` tool |
-| **Codex** | `~/.codex/skills/deep-distill` | Run `codex --enable skills` once; runs the pipeline sequentially, or delegates to Claude Code |
-| **Hermes** | `~/.hermes/skills/deep-distill` | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent); runs sequentially, or delegates to Claude Code |
+| **Codex** | `~/.codex/skills/deep-distill` | `codex --enable skills` once; fans out one [subagent](https://developers.openai.com/codex/subagents) per section in parallel |
+| **Hermes** | `~/.hermes/skills/deep-distill` | [hermes-agent](https://github.com/NousResearch/hermes-agent); enable the `terminal` toolset (`hermes tools`); fans out one [subagent](https://hermes-agent.nousresearch.com/docs/user-guide/features/delegation) per section in parallel |
 
 Restart the agent, then just ask — e.g. *"deep-distill this PDF in my Downloads."* The skill triggers on requests to extract/compress/distill a long or figure-heavy document.
 
 ### Requirements
 
+- **A shell / terminal / code-execution tool** — the skill *runs scripts*, it never reads the PDF directly. Claude Code: Bash (built in); Hermes: the `terminal` toolset (`hermes tools` to enable); Codex: built in once skills are on. Without it the agent can't run the pipeline.
 - **Python 3.8+** (PyMuPDF auto-installs via `pip --user` on first run).
 - A **vision-capable model** (to read and explain figures).
-- **Best with a multi-agent Workflow/subagent tool** (Claude Code) for the parallel, faithfulness-gated federation. On a single-agent Codex/Hermes session the *same* pipeline runs **sequentially** — slower, same artifact — or you can delegate the run to Claude Code (both ship a delegation skill).
+- **Subagent fan-out** — the skill states the *intent* ("dispatch one subagent per section, in parallel") and each agent uses whatever current parallel-subagent capability it has — so it stays correct as those tools evolve. Claude Code, Codex, and Hermes all provide one; the parent then synthesizes.
 
 ---
 
