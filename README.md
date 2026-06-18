@@ -58,29 +58,69 @@ The splitting and assembly are cheap scripts; only the judgment work uses agents
 
 ---
 
+## Validation
+
+This pipeline was **stress-tested against itself**, not just asserted to be good. We ran a **blind A/B**: distill the same source chapters with two method versions, then have an independent panel of judge-agents — who don't know which method produced which output, and who read the original source to ground every call — score six dimensions (faithfulness, wisdom-coverage, qualifier preservation, density, figure explanation, usability).
+
+It took three rounds. An early version that bolted on every fashionable summarization technique (including a fixed-length Chain-of-Density pass) **lost to the simpler baseline 7–2** — it bought density by quietly dropping whole subsections and fabricating figure values. A completeness-first retune *also* lost 7–2 (it stopped fabricating but began silently "correcting" source typos and still dropped worked examples). The shipped method (**v4**) keeps the original's **verbatim-fidelity, keep-everything core** and adds only the changes that independently helped — figure anti-fabrication, cross-section links, Q-cues — and **won 9–0**: faithfulness +1.11, coverage +0.33, usability +1.00, with the one honest cost being density (v4 is more verbose, by design).
+
+Full methodology, all three rounds, and per-dimension scores are in **[`EVALUATION.md`](EVALUATION.md)**. The lesson generalizes: a technique that is state-of-the-art for *fixed-length summaries* (Chain-of-Density) can be actively harmful for *lose-nothing distillation*. Measure on your actual objective — don't assume "more SOTA" is better.
+
+---
+
 ## Install
 
-deep-distill is a Claude Code skill. Either:
+deep-distill is a portable **SKILL.md** skill — the same skill works in **Claude Code**, **Codex**, and **Hermes** ([SKILL.md is a cross-agent standard](https://developers.openai.com/codex/skills); only the install directory differs).
 
-**A. Clone into your skills directory**
+### One-command install
+
 ```bash
-git clone https://github.com/sirouk/deep-distill ~/.claude/skills/deep-distill
+# Claude Code  → ~/.claude/skills/deep-distill
+curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- claude
+
+# Codex        → ~/.codex/skills/deep-distill      (then once: codex --enable skills)
+curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- codex
+
+# Hermes       → ~/.hermes/skills/deep-distill
+curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- hermes
+
+# …or all three at once
+curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- all
 ```
 
-**B. Package and install the `.skill` bundle**
+The installer pulls `SKILL.md` + `scripts/` + `references/` from raw GitHub into the right per-agent skills directory. (Skim [`install.sh`](install.sh) before piping any installer to `bash` — good hygiene.)
+
+### Manual install (raw URLs, no script)
+
 ```bash
-git clone https://github.com/sirouk/deep-distill
-# then zip the folder as deep-distill.skill, or use Claude Code's skill packager,
-# and open/install the resulting .skill file.
+AGENT_DIR=~/.claude/skills/deep-distill        # or ~/.codex/skills/deep-distill , ~/.hermes/skills/deep-distill
+mkdir -p "$AGENT_DIR/scripts" "$AGENT_DIR/references"
+BASE=https://raw.githubusercontent.com/sirouk/deep-distill/main
+for f in SKILL.md scripts/stage_document.py scripts/assemble.py \
+         references/workflow-template.js references/techniques.md; do
+  curl -fsSL "$BASE/$f" -o "$AGENT_DIR/$f"
+done
 ```
 
-Then just ask Claude, e.g. *"deep-distill this PDF in my Downloads"* — the skill triggers on requests to extract/compress/distill a long or figure-heavy document.
+### Or clone the whole repo into the skills dir
+
+```bash
+git clone https://github.com/sirouk/deep-distill ~/.claude/skills/deep-distill   # or ~/.codex/... , ~/.hermes/...
+```
+
+| Agent | Skills directory | Notes |
+|---|---|---|
+| **Claude Code** | `~/.claude/skills/deep-distill` | Full parallel, faithfulness-gated federation via the `Workflow` tool |
+| **Codex** | `~/.codex/skills/deep-distill` | Run `codex --enable skills` once; runs the pipeline sequentially, or delegates to Claude Code |
+| **Hermes** | `~/.hermes/skills/deep-distill` | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent); runs sequentially, or delegates to Claude Code |
+
+Restart the agent, then just ask — e.g. *"deep-distill this PDF in my Downloads."* The skill triggers on requests to extract/compress/distill a long or figure-heavy document.
 
 ### Requirements
 
-- **Claude Code** with the **Workflow tool / subagents** (multi-agent orchestration) — this skill is fundamentally federated and will not run on a single-agent setup.
-- **Python 3.8+** (PyMuPDF is auto-installed via `pip --user` on first run).
-- Vision-capable model (to read and explain figures).
+- **Python 3.8+** (PyMuPDF auto-installs via `pip --user` on first run).
+- A **vision-capable model** (to read and explain figures).
+- **Best with a multi-agent Workflow/subagent tool** (Claude Code) for the parallel, faithfulness-gated federation. On a single-agent Codex/Hermes session the *same* pipeline runs **sequentially** — slower, same artifact — or you can delegate the run to Claude Code (both ship a delegation skill).
 
 ---
 
@@ -102,15 +142,18 @@ Then just ask Claude, e.g. *"deep-distill this PDF in my Downloads"* — the ski
 
 ```
 deep-distill/
-├── SKILL.md                       # the skill: triggering + the pipeline
+├── SKILL.md                       # the skill: triggering + the pipeline (portable across agents)
+├── install.sh                     # one-command installer for Claude Code / Codex / Hermes
 ├── scripts/
 │   ├── stage_document.py          # document → sections + figures + manifest
 │   └── assemble.py                # workflow result → final markdown
 ├── references/
-│   ├── workflow-template.js       # the federated 5-stage workflow
+│   ├── workflow-template.js       # the federated 5-stage workflow (canonical prompt spec)
 │   └── techniques.md              # verified, cited research foundation
 ├── examples/
 │   └── bitcoin-whitepaper.distilled.md
+├── EVALUATION.md                  # blind-A/B methodology + how the method was validated
+├── CHANGELOG.md
 ├── LICENSE                        # MIT
 └── README.md
 ```

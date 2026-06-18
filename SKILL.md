@@ -17,7 +17,10 @@ Skip it for short documents (a few pages — just read and summarize directly) a
 
 A 400-page book cannot pass through one context without fidelity loss: details get averaged away, late chapters get short-changed, and figures are never actually looked at. So we **split the document into its natural sections once, deterministically**, then run a small team of agents per section. The non-negotiable quality move is the **precision+recall faithfulness gate**: a separate agent re-reads each section's *source* and checks the distilled draft both ways — every claim must be supported (precision, so compression can't invent "wisdom") and every salient source question must be answerable from the note (recall, so nothing important was dropped). That, plus per-section attention, is what lets you promise "nothing lost in translation." Splitting and assembly happen in plain scripts (stable, cheap); only the judgment work is done by agents.
 
-Calling the **Workflow tool is expected here** — these skill instructions are your opt-in to multi-agent orchestration. Do not ask the user whether to use a workflow; just run it.
+**Orchestration is capability-dependent (this skill runs on Claude Code, Codex, and Hermes):**
+- **If you have a multi-agent Workflow / subagent tool** (e.g. Claude Code's `Workflow`), use it — `references/workflow-template.js` is the ready-to-run federation. Calling it is expected; don't ask first, just run it.
+- **If you don't** (e.g. a single-agent Codex or Hermes session), run the *same* pipeline yourself, sequentially: loop over `manifest.sections` doing the four per-section stages, then the synthesis. `references/workflow-template.js` is the canonical spec of the prompts/rules to follow at each stage — read it and apply each agent's prompt in turn.
+- **Or delegate:** Codex and Hermes can hand the whole job to a Claude Code session (both ship a "delegate to Claude Code" skill); that gets you the full parallel federation.
 
 ## Pipeline
 
@@ -37,7 +40,9 @@ If it reports **no sections / empty text**, the PDF is probably scanned images �
 
 ### Step 2 — Read the manifest, then run the workflow
 
-Read `manifest.json` (small — metadata only, not the section text). Then launch the bundled workflow, passing the manifest's fields as `args`. The `text_file` and `figures` paths in the manifest are absolute, so the workflow's agents read them directly.
+Read `manifest.json` (small — metadata only, not the section text). The `text_file` and `figures` paths in it are absolute, so any agent can read them directly.
+
+**With a Workflow tool (Claude Code):** launch the bundled workflow, passing the manifest's fields as `args`.
 
 ```
 Workflow({
@@ -49,6 +54,8 @@ Workflow({
   }
 })
 ```
+
+**Without one (Codex / Hermes single-agent):** do the same work yourself — for each section in `manifest.sections`, run stages 1–4 below (reading `text_file` and any `figures`), collect the finalized sections, then run the synthesis. Follow the exact prompts/rules in `references/workflow-template.js`. It's slower (no parallelism) but produces the same artifact; or delegate to Claude Code for the parallel version.
 
 Per section the workflow runs (pipelined, so fast sections finish while slow ones are still going):
 1. **Extract** — one text agent digests prose/formulas/code under the **5-way inclusion gate** (Relevant / Specific / Novel / Faithful / Anywhere); 1–3 vision agents explain the figures (auto-split when a section has many) under a **no-fabrication rule** — report only legibly-readable values, hedge anything inferred as "≈ (from chart)". Runs in parallel.

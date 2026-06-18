@@ -1,4 +1,4 @@
-// deep-distill — federated extraction workflow (SOTA-upgraded).
+// deep-distill — federated extraction workflow (v4: verbatim-fidelity core + additive wins).
 //
 // Run with the Workflow tool, passing the staged manifest as `args`:
 //   Workflow({ scriptPath: ".../references/workflow-template.js",
@@ -9,28 +9,29 @@
 // args.title    : document title
 //
 // Pipeline per section (pipelined — no barrier between stages):
-//   1. Extract     : text agent (5-way inclusion gate) + vision agents (figures), in parallel
-//   2. Consolidate : completeness-first merge -> telegraphic draft w/ preservation tiers,
-//                    qualifier preservation, molecular sizing, Q-cues, intra-section links
-//                    (density comes from cutting filler/fusing redundancy, NEVER from dropping content)
-//   3. Verify      : precision+recall FAITHFULNESS GATE on the draft vs the source
-//   4. Finalize    : apply the gate's corrections (only if any) -> final section
+//   1. Extract     : text agent (5-way inclusion gate, verbatim artifacts) + vision agents (figures), parallel
+//   2. Consolidate : faithful lossless merge -> telegraphic draft; density via PROSE filler-cut only,
+//                    code/formulas/examples/exercises kept VERBATIM and in full; Q-cues, intra-section links
+//   3. Verify      : faithfulness gate vs source — precision, recall/coverage, literal-artifact fidelity
+//   4. Finalize    : reinstate dropped + restore verbatim artifacts + fix (only if the gate found anything)
 // Then a document-level synthesizer does context-aware merging with cross-section links.
 //
-// The technique choices (Chain-of-Density, FActScore/SAFE precision, QuestEval recall,
-// PropRAG context-collapse, Molecular Facts, LLMLingua preservation tiers, concept-map
-// cross-links, G-Eval self-check) are documented and cited in references/techniques.md.
+// Method history (see references/techniques.md + EVALUATION.md): the full "SOTA stack" (v2) and a
+// completeness-first retune (v3) each LOST a blind A/B to the simpler original (v1), because Chain-of-Density's
+// fixed length dropped content and "own-words" paraphrase silently rewrote code/formulas. v4 keeps the original's
+// winning behavior — VERBATIM literal artifacts, keep everything, flag (don't fix) source typos — and layers on
+// only the additions that independently helped: figure anti-fabrication, cross-section links, Q-cues.
 //
 // Returns { title, synthesis, sections: [ {id, title, final}, ... ] } -> feed to assemble.py.
 
 export const meta = {
   name: 'deep-distill',
-  description: 'Federated distillation: extract (inclusion gate) + figures -> Chain-of-Density consolidate -> faithfulness gate -> finalize -> cross-linked synthesis',
+  description: 'Federated distillation: extract (verbatim, inclusion gate) + figures -> faithful lossless consolidate -> faithfulness gate -> finalize -> cross-linked synthesis',
   phases: [
-    { title: 'Extract', detail: 'text digest (5-way gate) + diagram explanation, parallel' },
-    { title: 'Consolidate', detail: 'completeness-first merge, preservation tiers, molecular sizing' },
-    { title: 'Verify', detail: 'precision+recall faithfulness gate vs source' },
-    { title: 'Finalize', detail: 'apply corrections (only if the gate found any)' },
+    { title: 'Extract', detail: 'text digest (verbatim artifacts, 5-way gate) + diagram explanation, parallel' },
+    { title: 'Consolidate', detail: 'faithful lossless merge; prose-only compression; verbatim code/formulas' },
+    { title: 'Verify', detail: 'faithfulness gate: precision + recall/coverage + literal fidelity vs source' },
+    { title: 'Finalize', detail: 'reinstate dropped + restore verbatim (only if the gate found any)' },
     { title: 'Synthesize', detail: 'context-aware merge, cross-section links, concept-fold' },
   ],
 }
@@ -42,43 +43,46 @@ const DOCTITLE = A.title || 'Document'
 
 // ---- shared, research-backed rule blocks (kept DRY across stage prompts) -----------------
 
-// Preservation tiers (LLMLingua Budget Controller principle) — spend compression on redundancy,
-// never on load-bearing meaning.
+// Preservation tiers (LLMLingua Budget Controller principle) — spend compression on redundant PROSE only.
+// NOTE: worked examples + exercises are TIER-0 here. An earlier version put "worked examples" in the
+// drop-tier, which authorized exactly the omissions a blind A/B then penalized. Never again.
 const TIERS =
-  `PRESERVATION TIERS — TIER-0 (NEVER compress or drop): thesis/claims, definitions, numbers & ` +
-  `quantities, conditions/qualifiers, causal mechanisms, named methods/techniques, formulas ` +
-  `(verbatim), code/function names + key params. TIER-1 (compress moderately): supporting reasoning, ` +
-  `secondary qualifications. TIER-2 (crush or drop): worked examples, restatement, hedging, ` +
-  `transitions, anecdote.`
+  `PRESERVATION TIERS — TIER-0 (NEVER compress or drop): thesis/claims, definitions, numbers & quantities, ` +
+  `conditions/qualifiers, causal mechanisms, named methods/techniques, formulas (verbatim), code/snippets ` +
+  `(verbatim, name + params), and every worked example or exercise that demonstrates the method. ` +
+  `TIER-1 (compress but KEEP): supporting reasoning, secondary qualifications, the prose wrapping examples. ` +
+  `TIER-2 (crush or drop — PROSE ONLY): redundant restatement, hedging, transitions, throat-clearing, ` +
+  `marketing/anecdote. NEVER place a code line, formula, number, worked example, or exercise in TIER-2.`
 
-// Qualifier preservation (PropRAG "context collapse"; Molecular Facts) — the single biggest
-// guardrail: the qualifiers ARE the wisdom.
+// Qualifier preservation (PropRAG "context collapse"; Molecular Facts) — the qualifiers ARE the wisdom.
 const QUALIFIER =
   `QUALIFIER RULE (anti context-collapse): keep every when / where / for-whom / under-what-condition / ` +
   `by-whom / magnitude the source supplies. You MAY drop articles, copulas, connectives. You MUST NOT ` +
   `drop conditional operators (only-if, except-when, in-patients-with, post-2020, n=..). Compact syntax ` +
   `is fine: "X -> Y [when Z]", "claim [ONLY: cond1 + cond2]".`
 
-// Molecular sizing (Molecular Facts; propositions) — minimal but self-contained.
-const MOLECULAR =
-  `MOLECULAR SIZING: each line is (a) DECONTEXTUAL — standalone-interpretable, no dangling pronouns, ` +
-  `scope/condition present; and (b) MINIMAL — no scaffolding beyond what's needed. Prefer your own words ` +
-  `over copying source verbatim (except formulas/terms).`
+// Fidelity (Molecular Facts for sizing; the decisive A/B finding for verbatim artifacts).
+const FIDELITY =
+  `SIZING & FIDELITY: each line is DECONTEXTUAL (standalone-readable, no dangling pronouns, scope/condition ` +
+  `present) and MINIMAL (no scaffolding). VERBATIM LITERAL ARTIFACTS: reproduce code, formulas, equations, and ` +
+  `printed symbols EXACTLY as the source prints them — never paraphrase, normalize, or silently "correct" them. ` +
+  `If the source has a bug/typo (undefined var, wrong symbol/operator, missing term, Python-2 syntax), ` +
+  `transcribe it AND flag "[sic: source prints X; intended Y]". Use your own words ONLY for prose explanation — ` +
+  `never for code, formulas, or quoted text.`
 
-// 5-way inclusion gate (Chain-of-Density missing-entity criteria).
+// 5-way inclusion gate (Chain-of-Density missing-entity criteria — kept; the gate, not the fixed length).
 const INCLUSION =
   `INCLUSION GATE — keep an item iff: Relevant (to the section's thesis) + Specific (concrete/named, ` +
   `not vague) + Novel (not already captured) + Faithful (locatable in the source) + from Anywhere ` +
   `(deliberately scan captions, footnotes, tables, mid-section, appendices — not just the opening).`
 
 const STYLE_TELEGRAPHIC =
-  `STYLE = grammar-sacrifice / telegraphic / maximally compressed. Symbols ok: -> = + / vs w/ ~ ^ >= <= ` +
+  `STYLE = grammar-sacrifice / telegraphic / maximally compressed PROSE. Symbols ok: -> = + / vs w/ ~ ^ >= <= ` +
   `Σ ∏ √ ∈ ∴ ⇒. Density > prose but must stay unambiguous to an expert. No "in this section" filler.\n` +
-  `${TIERS}\n${QUALIFIER}\n${MOLECULAR}`
+  `${TIERS}\n${QUALIFIER}\n${FIDELITY}`
 
 const STYLE_READABLE =
-  `STYLE = compact but readable prose + bullets; plain sentences, no filler.\n${TIERS}\n${QUALIFIER}\n` +
-  `MOLECULAR SIZING: each point self-contained and minimal; own words.`
+  `STYLE = compact but readable prose + bullets; plain sentences, no filler.\n${TIERS}\n${QUALIFIER}\n${FIDELITY}`
 
 const STYLE = DENSITY === 'readable' ? STYLE_READABLE : STYLE_TELEGRAPHIC
 
@@ -94,7 +98,7 @@ log(`Distilling "${DOCTITLE}" — ${SECTIONS.length} sections, ` +
 const results = await pipeline(
   SECTIONS,
 
-  // ---- STAGE 1: extract digest (inclusion gate) + explain diagrams (parallel) -------------
+  // ---- STAGE 1: extract digest (inclusion gate, verbatim artifacts) + explain diagrams (parallel) ----
   async (sec) => {
     const figs = sec.figures || []
     const tasks = []
@@ -102,10 +106,11 @@ const results = await pipeline(
       `Extract ALL wisdom from section "${sec.title}" of "${DOCTITLE}".\n` +
       `Read the full section text with the Read tool: ${sec.text_file}\n\n` +
       `${INCLUSION}\n\n${STYLE}\n\n` +
-      `Emit dense PROPOSITIONS (atomic, standalone claims) organized by the section's own sub-structure. ` +
-      `Capture: motivation/problem, every method + formula, every named code/function (name + purpose + ` +
-      `params), every parameter default/threshold/number, every table's numeric results, and every ` +
-      `caveat/warning/author-opinion. Do NOT describe figures (separate pass). Output markdown bullets only.`,
+      `Emit dense PROPOSITIONS (atomic, standalone) organized by the section's own sub-structure. Capture EVERY: ` +
+      `subsection, method, formula (VERBATIM), named code/snippet (VERBATIM, name + params), parameter/default/` +
+      `threshold/number, table result, worked example, exercise (by number), and caveat/warning/author-opinion. ` +
+      `If the source prints a bug/typo in code or a formula, reproduce it verbatim and flag "[sic: ...]" — never ` +
+      `silently fix it. Do NOT describe figures (separate pass). Output markdown bullets only.`,
       { label: `extract:${sec.id}`, phase: 'Extract' }
     ))
     for (const grp of chunk(figs, 5)) {
@@ -134,27 +139,28 @@ const results = await pipeline(
     }
   },
 
-  // ---- STAGE 2: completeness-first consolidation -> draft (density via filler-cut, never content-cut) ---
+  // ---- STAGE 2: faithful lossless consolidation -> draft (prose-only compression; verbatim artifacts) ----
   async (r) => {
     const hasFigs = (r.sec.figures || []).length > 0
     const draft = await agent(
       `Consolidate section "${r.sec.title}" of "${DOCTITLE}" into ONE dense reference section.\n\n` +
       `--- EXTRACTED PROPOSITIONS ---\n${r.digest}\n\n--- FIGURE EXPLANATIONS ---\n${r.diagrams}\n--- END ---\n\n` +
       `${STYLE}\n\n` +
-      `METHOD — completeness-first densification: (1) draft from the propositions; (2) make it DENSE by ` +
-      `cutting filler, fusing redundancy, and telegraphing phrasing — NOT by dropping content. COMPLETENESS ` +
-      `IS NON-NEGOTIABLE: never omit a TIER-0 item, a figure, a subsection, a named code/snippet, an ` +
-      `exercise, or a numeric parameter to save space. There is NO length budget — the section is exactly as ` +
-      `long as completeness requires. Apply the preservation tiers + qualifier rule strictly; de-duplicate.\n` +
-      `COVERAGE CHECK before finishing: every subsection, figure, named code/snippet, parameter, and exercise ` +
-      `present in the inputs must appear in your output.\n` +
-      `SELECTIVITY (foregrounding only, never omission): surface the high-resonance claims (surprising / ` +
-      `reframing / load-bearing) first; compress lower-value material harder, but still keep it.\n\n` +
+      `METHOD — faithful lossless merge (NOT a summary): (1) assemble all propositions + figure explanations into ` +
+      `the section; (2) make it dense ONLY by cutting filler and fusing redundant PROSE and telegraphing PROSE ` +
+      `phrasing — never by dropping content, and never by paraphrasing a literal artifact. Code, formulas, ` +
+      `symbols, numbers, worked examples, and exercises are reproduced VERBATIM and in full (source typos kept + ` +
+      `flagged "[sic]"). COMPLETENESS IS NON-NEGOTIABLE: no length budget; the section is exactly as long as ` +
+      `fidelity requires. Apply the preservation tiers + qualifier rule strictly; de-duplicate PROSE only.\n` +
+      `COVERAGE CHECK before finishing: every subsection, figure, code/snippet, parameter, worked example, and ` +
+      `exercise in the inputs appears in your output.\n` +
+      `SELECTIVITY (foregrounding only, NEVER omission): surface high-resonance claims (surprising / reframing / ` +
+      `load-bearing) first; keep everything else.\n\n` +
       `Output EXACTLY this markdown structure:\n` +
       `## ${r.sec.title}\n` +
       `**Core idea:** <one own-words line>\n` +
       `**Q:** <3-5 terse questions this section answers — a coverage self-test>\n` +
-      `<### subsections with dense proposition bullets — every formula/code-name/param/number/caveat/qualifier preserved>\n` +
+      `<### subsections with dense proposition bullets — every formula/code/param/number/example/exercise/caveat/qualifier preserved verbatim where literal>\n` +
       (hasFigs ? `### Figures\n<one tight block per figure: what it shows + the takeaway>\n` : ``) +
       `### Links\n<2-5 concept —LABELED relation— concept propositions capturing this section's key ` +
       `relationships, e.g. "proof-of-work —secures→ ledger [by: making rewrites cost CPU]". Use real ` +
@@ -166,48 +172,50 @@ const results = await pipeline(
     return { sec: r.sec, draft: draft || `## ${r.sec.title}\n(consolidation failed)` }
   },
 
-  // ---- STAGE 3: precision + recall faithfulness gate (vs the source) ----------------------
+  // ---- STAGE 3: faithfulness gate (vs the source) ----------------------------------------
   async (r) => {
     const gate = await agent(
       `FAITHFULNESS GATE for the distilled section "${r.sec.title}" of "${DOCTITLE}".\n` +
       `Read the FULL source with the Read tool: ${r.sec.text_file}\n\n` +
       `--- DISTILLED DRAFT ---\n${r.draft}\n--- END DRAFT ---\n\n` +
       `Run these checks against the source, default to suspicion:\n` +
-      `1. PRECISION (FActScore/SAFE): decompose the draft into atomic claims; list every claim that is ` +
-      `NOT supported by the source, or that distorts it (overstated, wrong number, correlation stated as ` +
-      `causation).\n` +
-      `2. RECALL / COVERAGE (QuestEval): generate the salient questions the SOURCE answers; for each, try to ` +
-      `answer using ONLY the draft — list every one the draft can't answer. ALSO verify every source ` +
-      `subsection, figure, named code/snippet, numeric parameter, and exercise is represented; list any dropped.\n` +
+      `1. PRECISION (FActScore/SAFE): decompose the draft into atomic claims; list every claim NOT supported by ` +
+      `the source, or that distorts it (overstated, wrong number, correlation stated as causation).\n` +
+      `2. RECALL / COVERAGE (QuestEval): generate the salient questions the SOURCE answers; for each, answer using ` +
+      `ONLY the draft — list every one it can't. ALSO verify every source subsection, figure, code/snippet, ` +
+      `parameter, worked example, and exercise is present; list any dropped.\n` +
       `3. CONTEXT-COLLAPSE: for each compressed claim, check the source for a dropped conditional ` +
       `(when/where/population/magnitude/only-if). List collapses.\n` +
       `4. TIER-0 SURVIVAL: confirm no thesis, definition, key number, condition, causal mechanism, named ` +
-      `technique, or formula was lost. List any missing.\n` +
+      `technique, formula, worked example, or exercise was lost. List any missing.\n` +
       `5. DECONTEXTUALIZATION: flag any draft line whose meaning flips or is ambiguous read in isolation.\n` +
-      `6. FIGURE FABRICATION + LEAKAGE: flag any specific number/date/level attributed to a figure that is NOT ` +
-      `in the source text and NOT hedged as a chart-reading ("≈ … from chart") — a fabrication risk to hedge ` +
-      `or cut. Also flag any process commentary or figure page-label notes that leaked into the draft.\n\n` +
+      `6. FIGURE FABRICATION + LEAKAGE: flag any specific number/date/level attributed to a figure that is NOT in ` +
+      `the source text and NOT hedged as a chart-reading ("≈ … from chart"). Flag leaked process/page-label notes.\n` +
+      `7. LITERAL FIDELITY: compare every code line, formula, equation, and printed symbol against the source — ` +
+      `flag any that was paraphrased, normalized, or silently "corrected." If the source has a bug/typo, the draft ` +
+      `must reproduce it verbatim + flag "[sic]"; flag any source artifact the draft silently fixed.\n\n` +
       `${STYLE}\n` +
-      `Output ONLY the concrete corrections/additions as terse bullets grouped by check. If the draft passes ` +
-      `all six with nothing material to fix, output exactly: PASS.`,
+      `Output ONLY the concrete corrections/additions as terse bullets grouped by check. If the draft passes all ` +
+      `seven with nothing material to fix, output exactly: PASS.`,
       { label: `gate:${r.sec.id}`, phase: 'Verify' }
     )
     return { sec: r.sec, draft: r.draft, gate: (gate || 'PASS').trim() }
   },
 
-  // ---- STAGE 4: finalize — apply corrections only if the gate found any -------------------
+  // ---- STAGE 4: finalize — reinstate + restore verbatim, only if the gate found any -------
   async (r) => {
     const clean = /^pass\b/i.test(r.gate) || r.gate.length < 12
     if (clean) {
       return { id: r.sec.id, title: r.sec.title, final: r.draft }
     }
     const final = await agent(
-      `Produce the corrected final of the distilled section "${r.sec.title}" of "${DOCTITLE}" by applying ` +
-      `EVERY correction from the gate. Specifically: REINSTATE every dropped item it lists (subsection, ` +
-      `figure, code/snippet, parameter, exercise); FIX every unsupported/distorted claim; HEDGE or CUT every ` +
-      `fabricated figure value; RESTORE every collapsed qualifier; remove any leaked process commentary. ` +
-      `Completeness takes priority over brevity — grow the section as needed; do not drop anything already ` +
-      `correct. Keep the same format and dense style.\n\n` +
+      `Produce the corrected final of the distilled section "${r.sec.title}" of "${DOCTITLE}" by applying EVERY ` +
+      `correction from the gate. Specifically: REINSTATE every dropped item it lists (subsection, figure, ` +
+      `code/snippet, parameter, worked example, exercise); RESTORE the VERBATIM source form of any code/formula/` +
+      `symbol it flags as paraphrased or silently corrected (keep source typos + flag "[sic]"); FIX every ` +
+      `unsupported/distorted claim; HEDGE or CUT every fabricated figure value; RESTORE every collapsed qualifier; ` +
+      `remove any leaked process commentary. Completeness takes priority over brevity — grow the section as ` +
+      `needed; do not drop anything already correct. Keep the same format and dense style.\n\n` +
       `--- DRAFT ---\n${r.draft}\n\n--- CORRECTIONS (from the faithfulness gate) ---\n${r.gate}\n--- END ---\n\n` +
       `${STYLE}\n\nOutput only the corrected markdown section — no process notes.`,
       { label: `final:${r.sec.id}`, phase: 'Finalize' }
