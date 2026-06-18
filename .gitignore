@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Local distill workspaces / scratch output (staged text + rendered figures)
+workspace/
+*.workspace/
+scratch/
+*.tmp
+
+# Packaged build artifact (built on demand via package_skill)
+deep-distill.skill

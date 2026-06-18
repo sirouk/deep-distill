@@ -15,8 +15,9 @@ Ordinary summarization shortens text and averages meaning away. deep-distill is 
 - **Preservation tiers** — the thesis, definitions, numbers, conditions, causal mechanisms, named methods, and formulas are **never** compressed. All compression is spent on examples, restatement, and filler. *(LLMLingua Budget Controller principle.)*
 - **Qualifier rule (anti "context-collapse")** — telegraphic style may drop articles and copulas but **never** the `when / where / for-whom / under-what-condition` qualifiers. A claim shorn of its scope reads as universal and is *worse than omission*. *(PropRAG; Molecular Facts.)*
 - **Precision + recall faithfulness gate** — a separate agent re-reads the source and checks the draft both ways: every claim must be **supported** (precision — compression can't invent), and every salient source question must be **answerable from the note** (recall — nothing important dropped). *(FActScore / SAFE + QuestEval.)*
-- **Chain-of-Density** — holds length fixed while folding in missing salient items, forcing fusion instead of padding. *(Adams et al., 2023.)*
+- **Completeness-first compression** — density comes from cutting filler and fusing redundancy, **never** from dropping content; there is no length budget. (We learned this the hard way — see [Validation](#validation): a naive fixed-length Chain-of-Density pass quietly dropped whole subsections, so we replaced it.)
 - **Cross-section link layer** — the synthesizer emits labeled `concept —relation→ concept` links *between* sections, the integrative insight a per-section split would otherwise destroy. *(Concept maps; Zettelkasten link-with-a-reason.)*
+- **Figure anti-fabrication** — vision agents report only values they can actually read off a chart (hedged `≈ … from chart`), never invented specifics; a dedicated gate check hunts fabricated figure numbers.
 
 ---
 
@@ -41,9 +42,9 @@ flowchart LR
     M --> W{{federated workflow<br/>per section, pipelined}}
     subgraph W [ ]
       direction TB
-      E[1 · Extract<br/>text + figures, 5-way gate] --> C[2 · Consolidate<br/>Chain-of-Density + tiers]
-      C --> V[3 · Faithfulness gate<br/>precision + recall vs source]
-      V --> F[4 · Finalize<br/>apply corrections]
+      E[1 · Extract<br/>text + figures, 5-way gate] --> C[2 · Consolidate<br/>completeness-first + tiers]
+      C --> V[3 · Faithfulness gate<br/>precision + recall + coverage vs source]
+      V --> F[4 · Finalize<br/>reinstate dropped + fix]
     end
     W --> S[5 · Synthesis<br/>theses · cross-section links · indexes]
     S --> AS[assemble.py] --> O[One dense .md reference]
