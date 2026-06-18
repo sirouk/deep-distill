@@ -53,6 +53,13 @@ for t in $targets; do
   esac
 done
 
-echo "Done. Restart the agent so it picks up the skill."
-echo "  • Codex: skills may be gated — run 'codex --enable skills' once."
-echo "  • Then just ask, e.g.: \"deep-distill this PDF in my Downloads\""
+echo
+echo "Done. Restart the agent so it picks up the skill, then ask e.g.:"
+echo "  \"deep-distill this PDF in my Downloads\""
+for t in $targets; do
+  case "$t" in
+    claude) echo "  • Claude Code: start a fresh session, then /skills to confirm it loaded." ;;
+    codex)  echo "  • Codex: skills may be gated — run 'codex --enable skills' once, then restart." ;;
+    hermes) echo "  • Hermes: auto-discovered from ~/.hermes/skills on startup — just restart." ;;
+  esac
+done
