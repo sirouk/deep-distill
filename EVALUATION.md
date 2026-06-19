@@ -102,11 +102,43 @@ All three regressions fixed, and each fix was the cited reason judges ruled for 
 
 **Conclusion:** v4 is the shipped method — the original's verbatim-fidelity, keep-everything core, plus the three additions that independently helped (figure anti-fabrication, cross-section links, Q-cues). The two-round detour through the "full SOTA stack" is exactly why the method is what it is.
 
+## Machine-mode evaluation — a different scorecard
+
+Machine mode is not validated by the six human-reference dimensions above. A `.min.txt`
+prompt artifact has a stricter and narrower job: replace the source as operative
+instructions for an LLM while costing fewer tokens.
+
+Evaluate machine mode with this gate:
+
+1. **Atomic directive inventory** — extract every source rule, condition, threshold,
+   carve-out, permission, prohibition, priority, file path, command, variable, exact
+   string, and role/account/security boundary as a separate checklist item.
+2. **Blind reconstruction** — give independent readers only the compressed artifact,
+   no source and no decoder key, and have them reconstruct the directive set in plain
+   English.
+3. **Artifact-aware judging** — compare the checklist against both the artifact text
+   and the reconstructions. Mark missing only if genuinely absent, weakened,
+   scope-collapsed, contradictory, or garbled; do not chase phantom gaps caused by one
+   reader under-enumerating a preserved directive.
+4. **Patch loop** — restore genuine gaps compactly and repeat until `missing = []`.
+5. **Token gate** — measure source and artifact with `tiktoken` on `cl100k_base` and
+   `o200k_base`; require the artifact to be smaller and ASCII-only.
+
+The prototype that motivated this path compressed an operating-agreement-style
+instruction document by extracting 161 atomic directives, blind-reconstructing from the
+compressed artifact alone, and patching until the judge found **161 / 161 recovered, 0
+missing or weakened**, with roughly 20% fewer tokens on the tested OpenAI tokenizers.
+Treat that as a worked proof-of-concept, not a universal guarantee. Each new source
+document must pass its own directive-recovery and token gates.
+
 ## Threats to validity (read honestly)
 - **Small n** — 3 chapters, 9 verdicts/round. Chapter-level effects dominate; a different chapter set could move the headline.
 - **Familiar source** — *AIFML* is well represented in LLM training data, so judges can lean on parametric memory. This **understates** faithfulness gaps that would appear on an obscure document.
 - **LLM judges** — same-family bias, sensitivity to scaffolding/formatting, leniency toward fluent omission. Confidence labels clustered at "medium."
 - **Editorial weighting** — the verdict leans on faithfulness/coverage/qualifiers being most important. Under a density-weighted rubric the ranking changes.
+- **Machine-mode certification is functional, not formal** — zero missing directives
+  after blind reconstruction is strong practical evidence, but not a proof of identical
+  behavior across every model, temperature, or downstream prompt wrapper.
 
 ## Reproduce it
 The comparison is a Workflow: distill the same chapters with two template versions, extract the baseline, run a randomized blind judge panel, de-blind and tally. Point the harness at any document you can stage and at two `workflow-template.js` variants to A/B your own changes.

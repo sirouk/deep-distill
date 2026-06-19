@@ -1,6 +1,6 @@
 ---
 name: deep-distill
-description: Distill an entire long document — a PDF, EPUB, DOCX, book, research paper, textbook, manual, spec, or report — into one dense compressed reference that loses nothing — every formula, definition, named function or code snippet, parameter, number, and caveat, plus a written explanation of every diagram, chart, and figure. It uses a federated multi-agent workflow that splits the document into sections, extracts text and explains figures in parallel, runs an adversarial completeness pass to catch anything missed, then synthesizes the connective tissue. Use this skill whenever the user wants to extract the wisdom from, compress, distill, condense, make a cheat-sheet or study notes from, or get a thorough TL;DR of a large or technical document — especially when they say the file is long, dense, math-heavy, or full of figures, or ask you to explain all the diagrams or to not lose anything. Default output is telegraphic and grammar-sacrifice; a readable digest is available on request.
+description: Distill or compress a whole document with a faithfulness-gated, federated workflow. Use for human consumption when the user wants to extract wisdom from a long PDF, EPUB, DOCX, book, paper, manual, spec, report, or figure-heavy document into a dense study/reference note that preserves formulas, code, numbers, caveats, and figure explanations. Use for machine consumption when the user wants to minify operative instructions, system prompts, agent rules, policies, agreements, API/format contracts, or specs into a token-minimized ASCII artifact that can replace the source in an LLM prompt and must pass blind directive-recovery verification. If the user invokes deep-distill without choosing human or machine mode, ask which output they want before running.
 metadata:
   hermes:
     requires_toolsets: [terminal]
@@ -8,97 +8,207 @@ metadata:
 
 # deep-distill
 
-Compress a long document into one maximally dense reference, **losing nothing** — every formula, definition, named function/snippet, parameter, threshold, number, caveat, author opinion, and an explanation of every figure. Telegraphic ("grammar-sacrifice") by default; readable prose on request.
+Turn a whole document into one of two high-fidelity artifacts:
 
-## When to use this
+- **human mode** -> a dense, readable-or-telegraphic reference for a person studying the source. This is the original deep-distill path: preserve wisdom, formulas, code, figures, caveats, and cross-section links.
+- **machine mode** -> a token-minimized, ASCII-only prompt artifact for an LLM. This is stricter: the output is meant to replace the source as operative instructions, so every atomic directive must be recoverable from the compressed text alone.
 
-Trigger on: "extract the wisdom from / compress / distill / condense this book·paper·manual·report", "make a cheat sheet or study notes", "explain every diagram", "TL;DR this whole thing without losing anything". Also use it proactively when handed a large, dense, or figure-heavy document.
+## Mode Dispatch
 
-Skip it for short docs (a few pages — just read and summarize directly) and for docs the user wants *rewritten* or *critiqued* rather than distilled.
+Parse the invocation before doing any work.
 
-## How it works
+- `/deep-distill human @DOC` or "deep-distill this for a reader" -> **human mode**.
+- `/deep-distill machine @DOC` or "minify this prompt / agreement / rules file" -> **machine mode**.
+- `/deep-distill @DOC` or an ambiguous conversational request -> ask one concise question: "Distill for a human study reference, or compress for machine prompt use?" Do not silently guess.
 
-One pass over a long document loses fidelity — details get averaged out, late sections get short-changed, figures go unread. So deep-distill **splits the document into sections once, distills each section with its own subagent, faithfulness-checks each against the source, then synthesizes** the cross-section connective tissue. The non-negotiable quality move is the per-section **faithfulness gate**: a subagent re-reads the source and confirms every claim is supported (precision) and nothing salient was dropped (recall). Splitting and assembly are plain scripts; only the judgment is done by agents.
+Use the doc-type heuristic only to recommend an option when asking:
 
-**You need two tools — every supported agent has both:**
-1. a **shell** to run the scripts — Claude Code: Bash; Hermes: the `terminal` toolset (run `hermes tools` to enable); Codex: built-in (with `codex --enable skills`).
-2. a way to **run subagents in parallel** — whatever current multi-agent, task-delegation, or workflow capability your runtime provides (Claude Code, Codex, and Hermes each have one; use the most capable, current one available to you).
+- Recommend **machine** for text-only operative documents a model will consume: system/developer prompts, coding-agent rules, operating agreements, policies, API/format contracts, protocol/spec instructions, checklists, or anything the user says will be pasted into context.
+- Recommend **human** for books, papers, manuals, reports, textbook chapters, figure/math-heavy PDFs, and anything the user wants to study or learn from.
 
-## Hard rules — do exactly this, do not improvise
+## Shared Hard Rules
 
-1. **The only way to read the document is `stage_document.py`** (Step 1). It uses PyMuPDF to extract the text **and render every figure page to a PNG**. Run it with your real shell/terminal — never with a sandboxed code interpreter that can't see the user's files.
-2. **NEVER open, screenshot, "page-snapshot", or "browser-vision" the document.** Do not use a browser or any viewer/screenshot tool on the PDF — not as a first try, not as a fallback. You don't need to: the script already produced PNG images of the figures (in the workspace `figs/` folder, listed per section in `manifest.json` as absolute paths). To explain a figure, **read those PNG files**. Screenshotting the PDF is prohibited and gives wrong, low-fidelity results.
-3. **Run each command exactly as written, as one shell command**, substituting only the bracketed values. Do not invent multi-statement preflights (`uname`/`whoami`/`set -e …`) — they're unnecessary and error-prone.
-4. **On error, fix the command and retry — do not fall back.** Usual fixes: define `SKILL_DIR` in the same command (below); ensure `python3` is on `PATH`; let the script install PyMuPDF. If you truly have no shell tool, stop and tell the user — never substitute a browser read.
+1. **Read through `stage_document.py` first.** It creates a workspace with section text and a `manifest.json`. Human mode may render/extract figures. Machine mode must pass `--no-figs` unless the user explicitly says images contain operative instructions.
+2. **Never browser-read or screenshot a PDF.** For human-mode figures, use the rendered PNGs from the workspace `figs/` folder listed in `manifest.json`. Screenshotting/viewer snapshots are prohibited fallbacks.
+3. **Use the real shell/terminal.** Do not run the staging scripts inside an isolated interpreter that cannot see the user's files.
+4. **On staging errors, fix the command and retry.** Usual fixes: set `SKILL_DIR` in the same command, ensure `python3` exists, let the script install PyMuPDF. If there is no shell, stop and say so.
+5. **Machine-mode subagents must not write files or run git.** Every machine-mode agent prompt already says this; keep it there. Only the parent assembles/writes the final artifact after certification.
 
-**Path rule:** don't rely on any pre-set variable — build the skill folder from `$HOME` (always set) and define `SKILL_DIR` *inside* each command. Your agent's folder is one of: `$HOME/.claude/skills/deep-distill` (Claude Code) · `$HOME/.codex/skills/deep-distill` (Codex) · `$HOME/.hermes/skills/deep-distill` (Hermes).
+Path rule: define `SKILL_DIR` inside each shell command. Use the install location for the current agent:
 
-## Run it — five steps, in order
+- Claude Code: `$HOME/.claude/skills/deep-distill`
+- Codex: `$HOME/.codex/skills/deep-distill`
+- Hermes: `$HOME/.hermes/skills/deep-distill`
 
-### 1 · Stage — run this exactly, in your shell/terminal
+## Human Mode
+
+Use human mode when the output is for a person. It expands the document into a study-grade reference: section distillations, figure explanations, Q-cues, cross-section links, indexes, and synthesis.
+
+### 1. Stage
 
 ```bash
-SKILL_DIR="$HOME/.hermes/skills/deep-distill"   # ← your agent's dir: .claude / .codex / .hermes
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
 python3 "$SKILL_DIR/scripts/stage_document.py" "/absolute/path/to/document.pdf"
 ```
 
-The script auto-installs PyMuPDF on first run, extracts per-section text, and **renders every figure page to a PNG**. It prints two lines — `WORKSPACE: …` and `MANIFEST: …` — plus a section list. **Use those exact printed paths** in the steps below; don't guess them.
+The script prints `WORKSPACE: ...` and `MANIFEST: ...`. Use those exact paths.
 
-- Prints **no sections / empty text** → the PDF is scanned images: OCR it first (the `pdf` skill can), then re-run. Do **not** browser-read it.
-- `python3` missing or PyMuPDF won't install → fix that and re-run. That is the only path; there is no browser fallback.
-- Optional flags: `--title "..."`, `--section-level N` (granularity), `--dpi 200` (sharper figures), `--min-vector-drawings` / `--no-vector-figs`, `--keep-frontmatter`, `--workspace DIR`.
+Useful flags: `--title "..."`, `--section-level N`, `--dpi 200`, `--min-vector-drawings N`, `--no-vector-figs`, `--keep-frontmatter`, `--workspace DIR`.
 
-### 2 · Fan out — one subagent per section, in parallel
+### 2. Fan Out
 
-Read `manifest.json` (its `text_file` and `figures` paths are absolute). Then **dispatch one subagent per `sections` entry, in parallel** — using whatever concurrent-subagent / task-delegation / multi-agent capability your runtime currently offers. Reach for the most capable, current mechanism you have; if it supports async dispatch, fire all the section tasks and collect each as it returns. Hand each subagent its section's `text_file` + `figures`; it runs the four per-section stages (below) and returns its finalized `## <title>` markdown block. Collect every section, then continue to Step 3. Bound concurrency to a sane number if your runtime lets you.
+Read `manifest.json`. Dispatch one subagent per `sections` entry in parallel. Give each subagent its `text_file` plus its `figures` paths. It runs the four per-section stages below and returns its finalized markdown section.
 
-Shortcut: if your runtime has a ready-made multi-agent **workflow runner**, the bundled `references/workflow-template.js` is a drop-in federation — run it through that runner with `{ title: <manifest.title>, density: "telegraphic", sections: <manifest.sections> }`. It performs the fan-out **and** the synthesis and returns the whole result, so you can skip to Step 4.
+Shortcut: if the runtime has a workflow runner, run `references/workflow-template.js` with:
 
-Use `density: "readable"` instead of `"telegraphic"` if the user wants prose.
-
-### 3 · Synthesize  *(Codex / Hermes — Claude Code's Workflow already did this)*
-
-Run one subagent over all finalized sections to produce the document-level synthesis: core theses, **cross-section links**, formula/code indexes, top takeaways. The prompt is the synthesis stage in `references/workflow-template.js`.
-
-### 4 · Assemble
-
-Collect the pieces into `result.json` = `{ "title", "synthesis", "sections": [ {"id","title","final"}, … ] }` (Claude Code: that's exactly the object the Workflow returned — it lands in the task notification's `output-file`). Then:
-
-```bash
-SKILL_DIR="$HOME/.hermes/skills/deep-distill"   # ← your agent's dir: .claude / .codex / .hermes
-python3 "$SKILL_DIR/scripts/assemble.py" --result result.json --manifest "<workspace>/manifest.json" --out "<source dir>/<name> — Distilled.md"
+```js
+{
+  mode: "human",
+  title: "<manifest.title>",
+  density: "telegraphic",
+  sections: <manifest.sections>
+}
 ```
 
-### 5 · Deliver
+Use `density: "readable"` if the user asked for prose.
 
-Give the user the output file path (clickable) and surface the synthesis's top takeaways inline so they get value without opening it.
+### 3. Synthesize
 
-## The four per-section stages (what each subagent does)
+If the workflow runner did not already synthesize, run one subagent over all finalized sections to produce document-level theses, cross-section links, formula/code indexes, and top takeaways. The synthesis prompt lives in `references/workflow-template.js`.
 
-`references/workflow-template.js` holds the full, canonical prompt for each stage; in brief:
+### 4. Assemble
 
-1. **Extract** — digest prose/formulas/code under the **5-way inclusion gate** (Relevant / Specific / Novel / Faithful / Anywhere); explain figures by reading the **rendered PNGs** (the section's `figures` paths — never the original PDF, never a screenshot) under the **no-fabrication rule** (only legibly-readable values; hedge anything inferred as "≈ … from chart"). Reproduce code/formulas/symbols **verbatim**; preserve and flag source typos `[sic]` — never silently "fix" them.
-2. **Consolidate** — fuse into one telegraphic section. Density comes from cutting filler and fusing redundant prose **only**, never from dropping content (no length budget). Apply **preservation tiers** (thesis, defs, numbers, mechanisms, formulas, worked examples, exercises = never drop), the **qualifier rule** (keep when/where/under-what-condition), and **molecular sizing** (each line minimal but self-contained). Emit a `Q:` cue list and an intra-section `Links` block. No process commentary.
-3. **Faithfulness gate** — re-read the source and flag: unsupported/distorted claims (precision); salient source questions the draft can't answer + any dropped subsection/figure/code/example (recall + coverage); context-collapse; TIER-0 loss; decontextualization; figure fabrication; any literal artifact paraphrased or silently corrected. Return corrections, or `PASS`.
-4. **Finalize** — apply the corrections: reinstate anything dropped, restore verbatim artifacts, fix distortions. Skip when the gate returns `PASS`.
+Collect:
 
-The technique choices (Chain-of-Density, FActScore/SAFE, QuestEval, PropRAG, Molecular Facts, concept-map links) are cited in `references/techniques.md`; the method was chosen by blind A/B (see `EVALUATION.md`).
+```json
+{ "title": "...", "synthesis": "...", "sections": [ {"id":"01","title":"...","final":"..." } ] }
+```
+
+Then:
+
+```bash
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
+python3 "$SKILL_DIR/scripts/assemble.py" --mode human --result result.json --manifest "<workspace>/manifest.json" --out "<source dir>/<name> - Distilled.md"
+```
+
+### 5. Deliver
+
+Give the user the output file path and surface the synthesis's highest-value takeaways inline.
+
+## Machine Mode
+
+Use machine mode when the output is for an LLM. The goal is not a prettier summary; it is a smaller prompt artifact that preserves directive force. The output should be ASCII-only, tokenizer-measured, and blindly recoverable without the original.
+
+### Machine Pipeline
+
+1. **Inventory** -> extract every atomic directive from each section: rule, condition, threshold, exception, carve-out, prohibition, permission, priority, literal string, path, command, variable, role boundary.
+2. **Compress** -> rewrite into terse ASCII. Delete filler and rationale. Fuse duplicates. Preserve all qualifiers and exact literals. Never use rare Unicode as shorthand.
+3. **Blind reconstruct** -> multiple readers receive only the compressed artifact and reconstruct the directive set.
+4. **Artifact-aware judge** -> compare the source-derived directive checklist against both the artifact text and the reconstructions. Mark missing only when genuinely absent, weakened, scope-collapsed, contradictory, or garbled.
+5. **Patch loop** -> restore missing directives compactly and repeat until zero gaps, or return `needs_patch`.
+6. **Token gate** -> measure source vs artifact with `tiktoken` (`cl100k_base` and `o200k_base`); require the artifact to be smaller and ASCII-only.
+
+### 1. Stage
+
+```bash
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
+python3 "$SKILL_DIR/scripts/stage_document.py" "/absolute/path/to/DOC.md" --no-figs --min-chars 1 --keep-frontmatter
+```
+
+For prompt/agreement/rules files, keep short sections. A one-line section can still be a binding directive.
+
+### 2. Run the Workflow
+
+Run `references/workflow-template.js` with:
+
+```js
+{
+  mode: "machine",
+  title: "<manifest.title>",
+  sections: <manifest.sections>,
+  machine_candidates: 3,
+  machine_patch_rounds: 3
+}
+```
+
+The workflow returns:
+
+```json
+{
+  "title": "...",
+  "mode": "machine",
+  "status": "certified|needs_patch",
+  "certified": true,
+  "artifact": "...",
+  "directive_count": 161,
+  "verification": {
+    "status": "certified",
+    "total_count": 161,
+    "recovered_count": 161,
+    "missing": [],
+    "ascii_ok": true
+  }
+}
+```
+
+If `status` is `needs_patch`, do not use the artifact as a replacement prompt. Inspect `verification.missing`, patch, and rerun.
+
+### 3. Assemble
+
+```bash
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
+python3 "$SKILL_DIR/scripts/assemble.py" --mode machine --result result.json --manifest "<workspace>/manifest.json" --out "<source dir>/<name>.min.txt"
+```
+
+The assembler refuses uncertified or non-ASCII machine artifacts by default. Use `--allow-uncertified` only to inspect a failed candidate, not to ship it.
+
+### 4. Token Gate
+
+```bash
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
+python3 "$SKILL_DIR/scripts/measure_tokens.py" --compare "/absolute/path/to/DOC.md" "<source dir>/<name>.min.txt" --require-smaller --require-ascii
+```
+
+First run may bootstrap `tiktoken` into `~/.cache/deep-distill/token-venv`. Report both tokenizers. If the artifact is not smaller in both, rerun compression with a tighter candidate or tell the user the document is already near its compact limit.
+
+### 5. Deliver
+
+Give the user the `.min.txt` path plus a short certificate:
+
+- directive recovery: `N/N`, missing `0`
+- ASCII: pass/fail
+- token counts: source -> minified for `cl100k_base` and `o200k_base`
+- honest caveat: this is strong practical evidence of functional equivalence, not a mathematical proof every model will obey it identically.
+
+## The Human Per-Section Stages
+
+`references/workflow-template.js` holds the canonical prompts. In brief:
+
+1. **Extract** -> digest prose/formulas/code under the 5-way inclusion gate; explain figures by reading rendered PNGs only; reproduce literal code/formulas/symbols verbatim; preserve source typos with `[sic]`.
+2. **Consolidate** -> fuse into one dense section. Compression comes from cutting filler and fusing redundant prose only; never drop tier-0 content. Emit `Q:` cues and `Links`.
+3. **Faithfulness gate** -> re-read source and check precision, recall/coverage, context-collapse, tier-0 survival, decontextualization, figure fabrication, and literal fidelity.
+4. **Finalize** -> apply corrections, reinstate dropped items, restore verbatim artifacts, fix distortions.
 
 ## Tuning
 
-- **Density** — `readable` vs `telegraphic` (default). Either way every formula/figure/caveat is preserved.
-- **Granularity** — `--section-level N` if auto-sectioning is too coarse/fine (aim for ~5–60 sections).
-- **Figures** — `--dpi 200` for dense plots; `--min-vector-drawings` / `--no-vector-figs` to tune vector-diagram detection.
+- **Mode** -> `human` vs `machine`; ask if absent.
+- **Human density** -> `telegraphic` default, `readable` on request.
+- **Machine aggressiveness** -> `machine_candidates` and `machine_patch_rounds`; never accept an artifact with any missing directives.
+- **Granularity** -> `--section-level N`, `--chunk-words N`, `--min-chars N`; aim for enough sections that each agent can reason locally.
+- **Figures** -> human mode can tune `--dpi`, `--min-vector-drawings`, `--no-vector-figs`; machine mode defaults to `--no-figs`.
 
-## Edge cases
+## Edge Cases
 
-- **Scanned PDFs** → image-only pages yield no text; OCR first, then re-run.
-- **No bookmarks** → in-text numbered-heading detection (consecutive 1,2,3…); only then page chunks.
-- **DOCX/EPUB figures** → embedded images extracted and attached to their section; vector art (EMF/WMF/SVG) is skipped.
+- **Scanned PDFs** -> OCR first, then stage. Do not browser-read.
+- **No PDF bookmarks** -> the stager detects numbered headings, then falls back to page chunks.
+- **DOCX/EPUB figures** -> human mode extracts embedded images where possible; vector-only formats may be skipped.
+- **Machine doc with examples** -> keep examples only if they carry operative rules, thresholds, literals, or exceptions. Drop examples that merely justify a rule.
+- **Machine artifact fails token gate** -> do not fake a win. Either tighten and rerun or report that the source is already compact.
 
 ## Files
 
-- `scripts/stage_document.py` — document → sections + figures + `manifest.json` (multi-format).
-- `references/workflow-template.js` — the federation + the canonical per-stage prompts.
-- `scripts/assemble.py` — collected results → final markdown (TOC + synthesis).
-- `references/techniques.md` — the verified, cited research foundation.
+- `scripts/stage_document.py` -> document to sections, figures, and `manifest.json`.
+- `references/workflow-template.js` -> human federation plus machine compression/certification workflow.
+- `scripts/assemble.py` -> human result to markdown, or certified machine artifact to `.min.txt`.
+- `scripts/measure_tokens.py` -> `tiktoken` token gate for machine mode.
+- `references/techniques.md` -> cited research foundation and mode-specific technique notes.

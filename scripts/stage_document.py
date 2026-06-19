@@ -21,7 +21,7 @@ Usage:
   python stage_document.py INPUT [--workspace DIR] [--dpi 150]
          [--min-sections 6] [--max-sections 80] [--min-chars 400]
          [--section-level N] [--chunk-pages 12] [--chunk-words 6000]
-         [--keep-frontmatter]
+         [--keep-frontmatter] [--no-figs]
 
 The script prints the workspace path and a section summary; read manifest.json
 next, then pass its `sections` array to the workflow via `args`.
@@ -152,6 +152,8 @@ def detect_headings(text):
 
 
 def render_figs(doc, mat, pages, ws, cid):
+    if not pages:
+        return []
     out_files = []
     for pg in pages:
         out = ws / "figs" / f"{cid}__p{pg}.png"
@@ -177,12 +179,13 @@ def stage_pdf(src, ws, args):
     # A page is a "figure page" if it has a raster image OR enough VECTOR drawings.
     # Many papers (e.g. the Bitcoin whitepaper) draw all diagrams as vector line-art,
     # which get_images() never reports — without this, every diagram is silently missed.
-    minvec = 0 if args.no_vector_figs else args.min_vector_drawings
+    minvec = 0 if (args.no_figs or args.no_vector_figs) else args.min_vector_drawings
     fig_pages = set()
-    for p in range(npages):
-        pg = doc[p]
-        if pg.get_images(full=True) or (minvec and len(pg.get_drawings()) >= minvec):
-            fig_pages.add(p + 1)
+    if not args.no_figs:
+        for p in range(npages):
+            pg = doc[p]
+            if pg.get_images(full=True) or (minvec and len(pg.get_drawings()) >= minvec):
+                fig_pages.add(p + 1)
 
     sections, dropped = [], []
     sid = 0
@@ -370,7 +373,8 @@ def stage_docx(src, ws, args):
             else:
                 if text.strip():
                     cur_text.append(text)
-                cur_imgs.extend(rids)
+                if not args.no_figs:
+                    cur_imgs.extend(rids)
         flush()
     title = src.stem
     return title, sections
@@ -418,17 +422,18 @@ def stage_epub(src, ws, args):
         sid += 1; cid = slug(sid)
         figs = []
         base = os.path.dirname(zpath(href))
-        for k, m in enumerate(re.finditer(r'(?i)<img[^>]*src="([^"]+)"', raw)):
-            ip = os.path.normpath(os.path.join(base, m.group(1))).replace("\\", "/")
-            try:
-                data = z.read(ip)
-            except KeyError:
-                continue
-            ext = os.path.splitext(ip)[1] or ".png"
-            if ext.lower() in (".svg",):
-                continue
-            out = ws / "figs" / f"{cid}__img{k}{ext}"
-            out.write_bytes(data); figs.append(str(out))
+        if not args.no_figs:
+            for k, m in enumerate(re.finditer(r'(?i)<img[^>]*src="([^"]+)"', raw)):
+                ip = os.path.normpath(os.path.join(base, m.group(1))).replace("\\", "/")
+                try:
+                    data = z.read(ip)
+                except KeyError:
+                    continue
+                ext = os.path.splitext(ip)[1] or ".png"
+                if ext.lower() in (".svg",):
+                    continue
+                out = ws / "figs" / f"{cid}__img{k}{ext}"
+                out.write_bytes(data); figs.append(str(out))
         tf = write_section(ws, cid, sec_title, text)
         sections.append({"id": cid, "title": sec_title, "text_file": str(tf),
                          "chars": len(text), "figures": figs})
@@ -483,6 +488,8 @@ def main():
                     help="treat a page as a figure page if it has >= this many vector drawings")
     ap.add_argument("--no-vector-figs", action="store_true", dest="no_vector_figs",
                     help="disable vector-diagram detection (use raster images only)")
+    ap.add_argument("--no-figs", action="store_true", dest="no_figs",
+                    help="disable all figure detection/extraction/rendering (machine-mode default)")
     ap.add_argument("--fallback-title", default=None, dest="fallback_title")
     ap.add_argument("--title", default=None, help="override the document title (else PDF metadata / filename)")
     ap.add_argument("--keep-frontmatter", action="store_true", dest="keep_frontmatter",

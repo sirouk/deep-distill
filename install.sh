@@ -16,7 +16,7 @@ set -euo pipefail
 REPO="${DEEP_DISTILL_REPO:-sirouk/deep-distill}"
 BRANCH="${DEEP_DISTILL_BRANCH:-main}"
 BASE="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
-FILES=(SKILL.md scripts/stage_document.py scripts/assemble.py references/workflow-template.js references/techniques.md)
+FILES=(SKILL.md scripts/stage_document.py scripts/assemble.py scripts/measure_tokens.py references/workflow-template.js references/techniques.md)
 
 claude_dir="$HOME/.claude/skills/deep-distill"
 codex_dir="$HOME/.codex/skills/deep-distill"

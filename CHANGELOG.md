@@ -2,6 +2,27 @@
 
 All notable changes to deep-distill. Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Human vs machine modes** in `SKILL.md` and `references/workflow-template.js`.
+  - Human mode keeps the existing v4 dense-reference pipeline.
+  - Machine mode inventories atomic directives, compresses to ASCII prompt artifacts,
+    blind-reconstructs from the artifact alone, runs an artifact-aware fidelity judge,
+    patches genuine gaps, and returns `certified` only at zero missing directives.
+- **`scripts/measure_tokens.py`** — token gate for machine artifacts using `tiktoken`
+  (`cl100k_base` and `o200k_base`) with cached-venv bootstrap.
+- **Machine assembly path** in `scripts/assemble.py`, including default refusal of
+  uncertified or non-ASCII machine artifacts.
+- **`--no-figs` staging flag** for text-only machine documents.
+
+### Changed
+- README now presents deep-distill as a two-mode skill: human study references and
+  machine prompt minification.
+- Installer now includes `scripts/measure_tokens.py`.
+- Evaluation/research docs now describe machine-mode validation separately from the
+  human-mode blind A/B.
+
 ## [0.1.0] — initial release
 
 First public release: a Claude Code skill that distills a long document's *wisdom* — not just its word count — into one dense, faithful, human-readable reference.

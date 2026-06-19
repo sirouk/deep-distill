@@ -1,167 +1,270 @@
 # deep-distill
 
-**Compress an entire document's *wisdom* — not just its word count — into one dense, terse, human-readable reference that loses nothing.** Every formula, definition, named function, parameter, number, caveat, and an explanation of every diagram. Telegraphic ("grammar-sacrifice") by default; readable prose on request.
+**Distill a document for a human, or compress it for a machine, without pretending those are the same job.**
 
-deep-distill is a [Claude Code](https://claude.com/claude-code) **skill**. It turns a 400-page book or a dense paper into a single reference file by splitting the document into its natural sections and running a federated team of agents over each one — extracting, explaining the figures, and then **adversarially verifying against the source** so nothing is dropped or invented in translation.
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![Modes](https://img.shields.io/badge/modes-human%20%7C%20machine-111827)
+![Agents](https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Codex%20%C2%B7%20Hermes-8A2BE2)
 
-> The prompts aren't vibes. Every rule in the pipeline traces to a verified, cited technique from the summarization / knowledge-representation / cognitive-science literature — see [`references/techniques.md`](references/techniques.md).
+deep-distill began as a tool for turning long, dense documents into something a person could actually use: a compact reference that keeps the formulas, caveats, figures, code, numbers, and connective tissue ordinary summaries sand away.
 
----
+Then a second use case showed up: not "make this nice to read," but "make this smaller so an LLM can consume it every time, without weakening the instructions." That is a different problem. A human note can expand, synthesize, and explain. A machine prompt artifact has to contract, stay ASCII, survive tokenization, and still let another model recover every operative directive without the original.
 
-## Why "wisdom, not words"
+So deep-distill now has two modes:
 
-Ordinary summarization shortens text and averages meaning away. deep-distill is built around the opposite goal — keep the *potency*:
+| Mode | Reader | Input | Output | Fidelity Test |
+|---|---|---|---|---|
+| **human** | A person studying the source | Books, papers, manuals, reports, figure-heavy PDFs | A dense `.md` reference with synthesis, figures, Q-cues, links, formulas, code, caveats | Source-grounded faithfulness gate: precision + recall + coverage |
+| **machine** | An LLM consuming instructions | System prompts, agent rules, policies, agreements, API/format contracts, operative specs | A token-minimized ASCII `.min.txt` replacement artifact | Blind directive reconstruction + artifact-aware judge + token gate |
 
-- **Preservation tiers** — the thesis, definitions, numbers, conditions, causal mechanisms, named methods, and formulas are **never** compressed. All compression is spent on examples, restatement, and filler. *(LLMLingua Budget Controller principle.)*
-- **Qualifier rule (anti "context-collapse")** — telegraphic style may drop articles and copulas but **never** the `when / where / for-whom / under-what-condition` qualifiers. A claim shorn of its scope reads as universal and is *worse than omission*. *(PropRAG; Molecular Facts.)*
-- **Precision + recall faithfulness gate** — a separate agent re-reads the source and checks the draft both ways: every claim must be **supported** (precision — compression can't invent), and every salient source question must be **answerable from the note** (recall — nothing important dropped). *(FActScore / SAFE + QuestEval.)*
-- **Completeness-first compression** — density comes from cutting filler and fusing redundancy, **never** from dropping content; there is no length budget. (We learned this the hard way — see [Validation](#validation): a naive fixed-length Chain-of-Density pass quietly dropped whole subsections, so we replaced it.)
-- **Cross-section link layer** — the synthesizer emits labeled `concept —relation→ concept` links *between* sections, the integrative insight a per-section split would otherwise destroy. *(Concept maps; Zettelkasten link-with-a-reason.)*
-- **Figure anti-fabrication** — vision agents report only values they can actually read off a chart (hedged `≈ … from chart`), never invented specifics; a dedicated gate check hunts fabricated figure numbers.
-
----
-
-## Example: the Bitcoin whitepaper
-
-The demo distills Satoshi Nakamoto's 9-page [Bitcoin whitepaper](https://bitcoin.org/bitcoin.pdf) — short, famous, freely distributable, with real vector diagrams (the transaction/block chain, Merkle-tree pruning, SPV) and the Poisson double-spend math.
-
-➡️ **[`examples/bitcoin-whitepaper.distilled.md`](examples/bitcoin-whitepaper.distilled.md)**
-
-> 🍎 **Fun fact:** for about five years, *every Mac secretly shipped with the Bitcoin whitepaper.* A copy of `bitcoin.pdf` lived inside macOS as a test page for the Image Capture scanner utility (`/System/Library/Image Capture/Devices/VirtualScanner.app/Contents/Resources/simpledoc.pdf`), from **macOS Mojave (2018)** until Apple quietly removed it in **Ventura 13.4 (2023)**. Nobody at Apple ever publicly explained why it was there. It's a fitting demo input for a tool about hidden, compressed knowledge.
-
-That whitepaper also exposed — and drove — two real upgrades to the stager: its sections have **no PDF bookmarks** (so deep-distill detects in-text numbered headings) and its diagrams are **pure vector line-art** that `get_images()` never reports (so deep-distill detects figures by vector-drawing density too).
+The shared instinct is the same: compress meaning, not just words. The verification surface changes because the consumer changes.
 
 ---
 
-## How it works
+## Why This Exists
+
+Ordinary summarization optimizes for a shorter surface. deep-distill optimizes for preserved force.
+
+In **human mode**, force means the reader can study the output instead of the source and still recover the load-bearing insight: definitions, assumptions, mechanisms, equations, code, figures, warnings, and how sections relate.
+
+In **machine mode**, force means an LLM can obey the compressed artifact as if it had received the original operative document. That raises the bar: every rule, exception, threshold, permission, prohibition, file path, exact string, and "only/unless/never/even if asked" qualifier has to survive compression.
+
+The method is intentionally suspicious. It does not trust density for its own sake. Earlier versions that bolted on fashionable summarization tricks became terser by dropping subsections, fabricating figure values, and silently "fixing" source typos. The shipped human pipeline was picked only after blind A/B validation. Machine mode inherits that skepticism and adds a stricter round-trip verifier.
+
+---
+
+## How The Modes Work
+
+### Human Mode
+
+Human mode is the original v4 deep-distill pipeline:
 
 ```mermaid
 flowchart LR
-    A[Document<br/>PDF · EPUB · DOCX · TXT] --> B[stage_document.py<br/>split into sections<br/>+ render/extract figures]
-    B --> M[(manifest.json)]
-    M --> W{{federated workflow<br/>per section, pipelined}}
-    subgraph W [ ]
-      direction TB
-      E[1 · Extract<br/>text + figures, 5-way gate] --> C[2 · Consolidate<br/>completeness-first + tiers]
-      C --> V[3 · Faithfulness gate<br/>precision + recall + coverage vs source]
-      V --> F[4 · Finalize<br/>reinstate dropped + fix]
-    end
-    W --> S[5 · Synthesis<br/>theses · cross-section links · indexes]
-    S --> AS[assemble.py] --> O[One dense .md reference]
+    A[Document<br/>PDF · EPUB · DOCX · TXT/MD] --> B[stage_document.py<br/>sections + figures + manifest]
+    B --> C[Per-section agents<br/>extract + explain figures]
+    C --> D[Consolidate<br/>dense, complete reference]
+    D --> E[Faithfulness gate<br/>precision + recall + coverage]
+    E --> F[Finalize<br/>restore gaps + verbatim artifacts]
+    F --> G[Synthesis<br/>theses · links · indexes]
+    G --> H[assemble.py<br/>Distilled.md]
 ```
 
-1. **Stage** (`scripts/stage_document.py`) — a plain, deterministic script splits the document (bookmark TOC → in-text headings → page chunks), renders figure pages (raster **and** vector diagrams), and writes a `manifest.json`. Auto-installs [PyMuPDF](https://pymupdf.readthedocs.io/).
-2. **Distill** (`references/workflow-template.js`) — the federated [Workflow](https://docs.claude.com/en/docs/claude-code) runs the 5 stages above, one team per section, pipelined for speed. Returns structured JSON.
-3. **Assemble** (`scripts/assemble.py`) — stitches the result into one markdown file with a clickable table of contents and the document-level synthesis up top.
+It keeps:
 
-The splitting and assembly are cheap scripts; only the judgment work uses agents.
+- preservation tiers for thesis, definitions, numbers, conditions, causal mechanisms, named methods, formulas, code, worked examples, and exercises
+- qualifier protection against context collapse
+- verbatim fidelity for code/formulas/symbols, including source typos flagged with `[sic]`
+- figure anti-fabrication: report only values that are legible, hedge chart-read values as approximate
+- cross-section links so federated section work does not lose the document-level argument
 
----
+### Machine Mode
 
-## Validation
+Machine mode is prompt compression with a verifier, not a prettier summary:
 
-This pipeline was **stress-tested against itself**, not just asserted to be good. We ran a **blind A/B**: distill the same source chapters with two method versions, then have an independent panel of judge-agents — who don't know which method produced which output, and who read the original source to ground every call — score six dimensions (faithfulness, wisdom-coverage, qualifier preservation, density, figure explanation, usability).
+```mermaid
+flowchart LR
+    A[Operative doc<br/>prompt · rules · policy · spec] --> B[stage_document.py --no-figs]
+    B --> C[Inventory<br/>atomic directives]
+    C --> D[Compress<br/>ASCII · tokenizer-aware]
+    D --> E[Blind readers<br/>reconstruct directives]
+    E --> F[Artifact-aware judge<br/>artifact + reconstructions vs checklist]
+    F --> G{0 missing?}
+    G -- no --> H[Patch compactly] --> E
+    G -- yes --> I[assemble.py<br/>.min.txt]
+    I --> J[measure_tokens.py<br/>cl100k + o200k gate]
+```
 
-It took three rounds. An early version that bolted on every fashionable summarization technique (including a fixed-length Chain-of-Density pass) **lost to the simpler baseline 7–2** — it bought density by quietly dropping whole subsections and fabricating figure values. A completeness-first retune *also* lost 7–2 (it stopped fabricating but began silently "correcting" source typos and still dropped worked examples). The shipped method (**v4**) keeps the original's **verbatim-fidelity, keep-everything core** and adds only the changes that independently helped — figure anti-fabrication, cross-section links, Q-cues — and **won 9–0**: faithfulness +1.11, coverage +0.33, usability +1.00, with the one honest cost being density (v4 is more verbose, by design).
+Machine mode bans rare Unicode as a fake shortcut. The lesson from the prototype work was blunt: symbols can look shorter and still cost more BPE tokens. The real win is deleting filler, fusing duplicate rules, shortening labels, and preserving every qualifier.
 
-Full methodology, all three rounds, and per-dimension scores are in **[`EVALUATION.md`](EVALUATION.md)**. The lesson generalizes: a technique that is state-of-the-art for *fixed-length summaries* (Chain-of-Density) can be actively harmful for *lose-nothing distillation*. Measure on your actual objective — don't assume "more SOTA" is better.
+The verifier is deliberately blind: reader agents get only the compressed artifact, no original and no decoder key. Then a judge checks every source-derived directive against both the artifact text and the reconstructions. The artifact ships only when the missing list is empty and the token gate passes.
 
 ---
 
 ## Install
 
-deep-distill is a portable **SKILL.md** skill — the same skill works in **Claude Code**, **Codex**, and **Hermes** ([SKILL.md is a cross-agent standard](https://developers.openai.com/codex/skills); only the install directory differs).
-
-### One-command install
+deep-distill is a portable `SKILL.md` skill. The same files work in Claude Code, Codex, and Hermes; only the install directory differs.
 
 ```bash
-# Claude Code  → ~/.claude/skills/deep-distill
+# Claude Code  -> ~/.claude/skills/deep-distill
 curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- claude
 
-# Codex        → ~/.codex/skills/deep-distill      (then once: codex --enable skills)
+# Codex        -> ~/.codex/skills/deep-distill
 curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- codex
 
-# Hermes       → ~/.hermes/skills/deep-distill
+# Hermes       -> ~/.hermes/skills/deep-distill
 curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- hermes
 
-# …or all three at once
+# all three
 curl -fsSL https://raw.githubusercontent.com/sirouk/deep-distill/main/install.sh | bash -s -- all
 ```
 
-The installer pulls `SKILL.md` + `scripts/` + `references/` from raw GitHub into the right per-agent skills directory. (Skim [`install.sh`](install.sh) before piping any installer to `bash` — good hygiene.)
-
-### Manual install (raw URLs, no script)
+Manual install:
 
 ```bash
-AGENT_DIR=~/.claude/skills/deep-distill        # or ~/.codex/skills/deep-distill , ~/.hermes/skills/deep-distill
+AGENT_DIR=~/.codex/skills/deep-distill
 mkdir -p "$AGENT_DIR/scripts" "$AGENT_DIR/references"
 BASE=https://raw.githubusercontent.com/sirouk/deep-distill/main
-for f in SKILL.md scripts/stage_document.py scripts/assemble.py \
+for f in SKILL.md scripts/stage_document.py scripts/assemble.py scripts/measure_tokens.py \
          references/workflow-template.js references/techniques.md; do
   curl -fsSL "$BASE/$f" -o "$AGENT_DIR/$f"
 done
 ```
 
-### Or clone the whole repo into the skills dir
+Requirements:
 
-```bash
-git clone https://github.com/sirouk/deep-distill ~/.claude/skills/deep-distill   # or ~/.codex/... , ~/.hermes/...
-```
-
-| Agent | Skills directory | Notes |
-|---|---|---|
-| **Claude Code** | `~/.claude/skills/deep-distill` | Full parallel, faithfulness-gated federation via the `Workflow` tool |
-| **Codex** | `~/.codex/skills/deep-distill` | `codex --enable skills` once; fans out one [subagent](https://developers.openai.com/codex/subagents) per section in parallel |
-| **Hermes** | `~/.hermes/skills/deep-distill` | [hermes-agent](https://github.com/NousResearch/hermes-agent); enable the `terminal` toolset (`hermes tools`); fans out one [subagent](https://hermes-agent.nousresearch.com/docs/user-guide/features/delegation) per section in parallel |
-
-Restart the agent, then just ask — e.g. *"deep-distill this PDF in my Downloads."* The skill triggers on requests to extract/compress/distill a long or figure-heavy document.
-
-### Requirements
-
-- **A shell / terminal / code-execution tool** — the skill *runs scripts*, it never reads the PDF directly. Claude Code: Bash (built in); Hermes: the `terminal` toolset (`hermes tools` to enable); Codex: built in once skills are on. Without it the agent can't run the pipeline.
-- **Python 3.8+** (PyMuPDF auto-installs via `pip --user` on first run).
-- A **vision-capable model** (to read and explain figures).
-- **Subagent fan-out** — the skill states the *intent* ("dispatch one subagent per section, in parallel") and each agent uses whatever current parallel-subagent capability it has — so it stays correct as those tools evolve. Claude Code, Codex, and Hermes all provide one; the parent then synthesizes.
+- Python 3.8+
+- shell/terminal access
+- PyMuPDF for staging PDFs (auto-installed by `stage_document.py` when needed)
+- `tiktoken` for machine token gates (auto-installed by `measure_tokens.py` into `~/.cache/deep-distill/token-venv` when needed)
+- vision-capable model for human-mode figure explanation
+- subagent fan-out or a Workflow runner for the federated stages
 
 ---
 
-## Usage notes & tuning
+## Usage
 
-- **Density** — pass `density: "readable"` to the workflow for clean prose instead of telegraphic; formulas/figures/caveats are still preserved.
-- **Granularity** — `--section-level N` if auto-sectioning is too coarse/fine (aim for ~5–60 chapter-sized units).
-- **Figures** — `--dpi 200` for dense plots; `--min-vector-drawings` / `--no-vector-figs` to tune vector-diagram detection.
-- **Scope** — the workflow auto-pipelines and caps concurrency; bigger docs just take longer.
+Ask for the mode explicitly:
 
-## Honest limitations
-
-- **It is lossy.** The dense note discards the source; "nothing lost" means *no salient wisdom* lost (enforced by the faithfulness gate), not literal losslessness. Each claim is anchored to its section for traceability.
-- **It costs tokens.** A full book is tens of agents and millions of tokens over several minutes. That thoroughness is the point.
-- **Scanned PDFs need OCR first** (image-only pages yield no text).
-- The faithfulness gate is a strong reducer of omission/hallucination, **not** a proof of zero error.
-
-## Repository layout
-
+```text
+/deep-distill human @paper.pdf
+/deep-distill machine @LLM_OPA.md
 ```
+
+If no mode is supplied, the skill should ask. It may recommend a mode from the document type: books/papers/manuals usually mean human; prompts/rules/policies/agreements/specs usually mean machine.
+
+### Human Mode Commands
+
+```bash
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
+python3 "$SKILL_DIR/scripts/stage_document.py" "/absolute/path/to/paper.pdf"
+```
+
+Run `references/workflow-template.js` with:
+
+```js
+{
+  mode: "human",
+  title: "<manifest.title>",
+  density: "telegraphic",
+  sections: <manifest.sections>
+}
+```
+
+Assemble:
+
+```bash
+python3 "$SKILL_DIR/scripts/assemble.py" --mode human \
+  --result result.json \
+  --manifest "<workspace>/manifest.json" \
+  --out "<source dir>/<name> - Distilled.md"
+```
+
+### Machine Mode Commands
+
+```bash
+SKILL_DIR="$HOME/.codex/skills/deep-distill"
+python3 "$SKILL_DIR/scripts/stage_document.py" "/absolute/path/to/rules.md" --no-figs --min-chars 1 --keep-frontmatter
+```
+
+Run `references/workflow-template.js` with:
+
+```js
+{
+  mode: "machine",
+  title: "<manifest.title>",
+  sections: <manifest.sections>,
+  machine_candidates: 3,
+  machine_patch_rounds: 3
+}
+```
+
+Assemble only after the workflow returns `status: "certified"`:
+
+```bash
+python3 "$SKILL_DIR/scripts/assemble.py" --mode machine \
+  --result result.json \
+  --manifest "<workspace>/manifest.json" \
+  --out "<source dir>/<name>.min.txt"
+```
+
+Measure:
+
+```bash
+python3 "$SKILL_DIR/scripts/measure_tokens.py" \
+  --compare "/absolute/path/to/rules.md" "<source dir>/<name>.min.txt" \
+  --require-smaller --require-ascii
+```
+
+The final delivery should report directive recovery, missing count, ASCII status, and token counts for `cl100k_base` and `o200k_base`.
+
+---
+
+## Validation
+
+Human mode was validated with blind, source-grounded A/B tests across three method rounds. The important lesson: "more SOTA" was not automatically better. A fixed-length Chain-of-Density pass improved terseness while dropping content. A completeness-first rewrite stopped some hallucination but began silently correcting literal artifacts. The shipped v4 method kept the original keep-everything, verbatim-fidelity core and added only the pieces that independently helped: figure anti-fabrication, cross-section links, Q-cues, and qualifier preservation.
+
+See [`EVALUATION.md`](EVALUATION.md) for methodology and scores.
+
+Machine mode uses a separate validation surface:
+
+- source-derived atomic directive checklist
+- blind reconstruction from the compressed artifact alone
+- artifact-aware judge, so the verifier does not chase phantom misses caused by reader under-enumeration
+- patch loop until zero genuine gaps
+- tokenizer measurement on `cl100k_base` and `o200k_base`
+
+That is strong practical evidence of functional equivalence. It is not a mathematical proof that every model will obey the compressed artifact identically.
+
+---
+
+## Tuning
+
+| Knob | Applies To | Effect |
+|---|---|---|
+| `density` = `telegraphic` or `readable` | human | terse reference vs compact prose |
+| `--section-level N` | both | choose heading depth for sectioning |
+| `--chunk-words N` / `--min-chars N` | both | tune section size for text docs |
+| `--dpi 200` | human | sharper rendered figure pages |
+| `--no-figs` | machine | skip image work for text-only operative docs |
+| `machine_candidates` | machine | number of compression variants to verify |
+| `machine_patch_rounds` | machine | max rounds to restore missing directives |
+
+---
+
+## Honest Limits
+
+- Human mode is not literal losslessness. It aims for no salient wisdom lost, enforced by a faithfulness gate.
+- Machine mode can fail honestly. If the source is already compact, the token gate may reject the artifact.
+- Scanned PDFs need OCR before staging.
+- Figure explanation depends on image legibility.
+- LLM judges reduce risk; they do not remove it.
+- Machine artifacts should be reviewed before replacing high-stakes instructions.
+
+---
+
+## Repository Layout
+
+```text
 deep-distill/
-├── SKILL.md                       # the skill: triggering + the pipeline (portable across agents)
-├── install.sh                     # one-command installer for Claude Code / Codex / Hermes
+├── SKILL.md                       # mode dispatch + human/machine operating contract
+├── install.sh                     # installer for Claude Code / Codex / Hermes
 ├── scripts/
-│   ├── stage_document.py          # document → sections + figures + manifest
-│   └── assemble.py                # workflow result → final markdown
+│   ├── stage_document.py          # document -> sections + figures + manifest
+│   ├── assemble.py                # workflow result -> Distilled.md or .min.txt
+│   └── measure_tokens.py          # machine token gate via tiktoken
 ├── references/
-│   ├── workflow-template.js       # the federated 5-stage workflow (canonical prompt spec)
-│   └── techniques.md              # verified, cited research foundation
-├── examples/
-│   └── bitcoin-whitepaper.distilled.md
-├── EVALUATION.md                  # blind-A/B methodology + how the method was validated
+│   ├── workflow-template.js       # federated human workflow + machine certification path
+│   └── techniques.md              # research foundation
+├── EVALUATION.md                  # validation methodology
 ├── CHANGELOG.md
-├── LICENSE                        # MIT
+├── LICENSE
 └── README.md
 ```
 
 ## Acknowledgements
 
-The pipeline stands on published work — Chain-of-Density, LLMLingua, FActScore, SAFE, QuestEval, SummaC, BooookScore, PropRAG, Molecular Facts, Dense X / propositions, concept maps (Novak & Cañas), Zettelkasten, Progressive Summarization, and the Cornell method. Full citations in [`references/techniques.md`](references/techniques.md).
+The pipeline draws on Chain-of-Density, LLMLingua, LLMLingua-2, FActScore, SAFE, QuestEval, SummaC, BooookScore, PropRAG, Molecular Facts, propositions, concept maps, Zettelkasten-style links, Progressive Summarization, and the Cornell method. The citations and caveats live in [`references/techniques.md`](references/techniques.md).
 
 ## License
 
