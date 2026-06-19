@@ -71,13 +71,14 @@ flowchart LR
     E --> F[Artifact-aware judge<br/>artifact + reconstructions vs checklist]
     F --> G{0 missing?}
     G -- no --> H[Patch compactly] --> E
-    G -- yes --> I[assemble.py<br/>.min.txt]
-    I --> J[measure_tokens.py<br/>cl100k + o200k gate]
+    G -- yes --> I[Tighten<br/>certified-only squeeze]
+    I --> J[assemble.py<br/>.min.txt]
+    J --> K[measure_tokens.py<br/>cl100k + o200k gate]
 ```
 
-Machine mode bans rare Unicode as a fake shortcut. The lesson from the prototype work was blunt: symbols can look shorter and still cost more BPE tokens. The real win is deleting filler, fusing duplicate rules into compact blocks, shortening labels, and preserving every qualifier. Checklist IDs stay inside the verifier; they are not emitted into the final prompt artifact.
+Machine mode bans rare Unicode as a fake shortcut. The lesson from the prototype work was blunt: symbols can look shorter and still cost more BPE tokens. The real win is deleting filler, fusing duplicate rules into compact hard-telegraphic blocks, shortening labels, and preserving every qualifier. Checklist IDs stay inside the verifier; they are not emitted into the final prompt artifact.
 
-The verifier is deliberately blind: reader agents get only the compressed artifact, no original and no decoder key. Then a judge checks every source-derived directive against both the artifact text and the reconstructions. The patch loop repairs missing directives and ASCII failures. The artifact ships only when the missing list is empty, ASCII passes, and the token gate passes.
+The verifier is deliberately blind: reader agents get only the compressed artifact, no original and no decoder key. Then a judge checks every source-derived directive against both the artifact text and the reconstructions. The patch loop repairs missing directives and ASCII failures. The tighten loop only keeps a rewrite if it remains certified and scores smaller. The artifact ships only when the missing list is empty, ASCII passes, and the token gate passes.
 
 ---
 
@@ -175,7 +176,8 @@ Run `references/workflow-template.js` with:
   title: "<manifest.title>",
   sections: <manifest.sections>,
   machine_candidates: 3,
-  machine_patch_rounds: 3
+  machine_patch_rounds: 3,
+  machine_tighten_rounds: 2
 }
 ```
 
@@ -229,6 +231,7 @@ That is strong practical evidence of functional equivalence. It is not a mathema
 | `--no-figs` | machine | skip image work for text-only operative docs |
 | `machine_candidates` | machine | number of compression variants to verify |
 | `machine_patch_rounds` | machine | max rounds to restore missing directives |
+| `machine_tighten_rounds` | machine | certified-only final squeeze toward fewer tokens |
 
 ---
 

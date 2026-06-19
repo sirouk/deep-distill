@@ -106,7 +106,8 @@ Use machine mode when the output is for an LLM. The goal is not a prettier summa
 3. **Blind reconstruct** -> multiple readers receive only the compressed artifact and reconstruct the directive set.
 4. **Artifact-aware judge** -> compare the source-derived directive checklist against both the artifact text and the reconstructions. Mark missing only when genuinely absent, weakened, scope-collapsed, contradictory, or garbled.
 5. **Patch loop** -> restore missing directives or ASCII failures compactly and repeat until zero gaps and ASCII pass, or return `needs_patch`.
-6. **Token gate** -> measure source vs artifact with `tiktoken` (`cl100k_base` and `o200k_base`); require the artifact to be smaller and ASCII-only.
+6. **Tighten loop** -> if certified, rewrite in harder telegraphic register and keep the result only if it still certifies and is smaller.
+7. **Token gate** -> measure source vs artifact with `tiktoken` (`cl100k_base` and `o200k_base`); require the artifact to be smaller and ASCII-only.
 
 ### 1. Stage
 
@@ -127,7 +128,8 @@ Run `references/workflow-template.js` with:
   title: "<manifest.title>",
   sections: <manifest.sections>,
   machine_candidates: 3,
-  machine_patch_rounds: 3
+  machine_patch_rounds: 3,
+  machine_tighten_rounds: 2
 }
 ```
 
@@ -194,6 +196,7 @@ Give the user the `.min.txt` path plus a short certificate:
 - **Mode** -> `human` vs `machine`; ask if absent.
 - **Human density** -> `telegraphic` default, `readable` on request.
 - **Machine aggressiveness** -> `machine_candidates` and `machine_patch_rounds`; never accept an artifact with any missing directives.
+- **Machine tightening** -> `machine_tighten_rounds` squeezes certified artifacts only; it never keeps a candidate that loses certification or gets larger by token score.
 - **Machine output shape** -> fuse directives into compact blocks; keep inventory/checklist IDs out of the final artifact.
 - **Granularity** -> `--section-level N`, `--chunk-words N`, `--min-chars N`; aim for enough sections that each agent can reason locally.
 - **Figures** -> human mode can tune `--dpi`, `--min-vector-drawings`, `--no-vector-figs`; machine mode defaults to `--no-figs`.

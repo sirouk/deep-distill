@@ -56,6 +56,9 @@ functional recoverability is primary. The useful techniques shift accordingly:
    means no salient wisdom lost, machine mode demands every operative directive be
    recoverable. If a gap remains, or typographic punctuation survives ASCII
    normalization, the artifact is `needs_patch`, not shippable.
+6. **Tighten only after certification.** Aggressive hard-telegraphic rewriting is useful
+   only after correctness is established. Keep a tighter rewrite only if the blind
+   reconstruction gate still certifies it and the tokenizer proxy gets smaller.
 
 The machine verifier is strong practical evidence of functional equivalence, not a
 mathematical proof that every model will obey the compressed artifact identically.

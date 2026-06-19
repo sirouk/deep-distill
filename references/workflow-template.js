@@ -12,6 +12,7 @@
 // args.mode     : "human" (default) | "machine"
 // args.density  : human mode only: "telegraphic" (default) | "readable"
 // args.title    : document title
+// args.machine_tighten_rounds : machine mode only, certified-only squeeze rounds (default 2)
 //
 // Pipeline per section (pipelined — no barrier between stages):
 //   1. Extract     : text agent (5-way inclusion gate, verbatim artifacts) + vision agents (figures), parallel
@@ -40,7 +41,7 @@ export const meta = {
     { title: 'Verify', detail: 'faithfulness gate: precision + recall/coverage + literal fidelity vs source' },
     { title: 'Finalize', detail: 'reinstate dropped + restore verbatim (only if the gate found any)' },
     { title: 'Synthesize', detail: 'context-aware merge, cross-section links, concept-fold' },
-    { title: 'Machine Certify', detail: 'inventory directives -> compress ASCII -> blind reconstruct -> artifact-aware judge -> patch' },
+    { title: 'Machine Certify', detail: 'inventory directives -> compress ASCII -> blind reconstruct -> artifact-aware judge -> patch -> tighten' },
   ],
 }
 
@@ -121,6 +122,18 @@ const MACHINE_STYLE =
   `Never delete negation or scope words: not, never, only, unless, except, before, after, even-if-asked, ` +
   `>=, <=, exactly, at least, at most. Normalize typographic punctuation to ASCII ("..." not ellipsis, "-" ` +
   `not em dash, straight quotes not curly quotes) when preserving literal examples.\n${TOKEN_RULES}\n${TIERS}\n${QUALIFIER}\n${FIDELITY}`
+
+const HARD_TELEGRAPHIC =
+  `REGISTER = hard-telegraphic ASCII shorthand, NOT grammatical prose. Beyond MACHINE_STYLE: drop sentence ` +
+  `subjects when implied (you/it/the agent), drop articles (a/the) and copulas (is/are/be), drop weak ` +
+  `connectives (so/then/that/which/in order to). Use ASCII operator shorthand consistently: ! = not/never, ` +
+  `| = or/separator, & = and, -> = then/leads-to, >= <= thresholds, @ = at/in. One compact rule per line; ` +
+  `fuse rules sharing a subject, section, condition, or repeated qualifier into one line. Preserve EVERY ` +
+  `directive, negation, condition, threshold, carve-out, and literal specific; qualifier rule stays absolute. ` +
+  `Prose sentences are a failure here.\n` +
+  `EXAMPLE -- source: "You are operating autonomously. The user is not watching and cannot answer mid-task, ` +
+  `so asking 'Want me to?' will block the work." -> hard-telegraphic: "autonomous; user!watching, !answer ` +
+  `mid-task -> 'Want me to?'/'Shall I?' blocks work, !ask."`
 
 const INVENTORY_SCHEMA = {
   type: 'object',
@@ -352,7 +365,9 @@ async function runMachine() {
   const levels = [
     { key: 'safe', instruction: 'Conservative: keep more words if needed; zero directive risk beats size.' },
     { key: 'balanced', instruction: 'Balanced: delete filler aggressively while keeping natural decodability.' },
-    { key: 'max', instruction: 'Maximum: shortest artifact you believe survives blind reconstruction.' },
+    { key: 'max', instruction:
+      `Maximum: hard-telegraphic ASCII. Apply this register fully:\n${HARD_TELEGRAPHIC}\n` +
+      `Target the shortest artifact that still passes blind reconstruction; prose sentences are a failure here.` },
   ]
   const maxCandidates = boundedInt(A.machine_candidates, 3, 1, levels.length)
   const candidates = await parallel(levels.slice(0, maxCandidates).map(level => () => agent(
@@ -406,6 +421,29 @@ async function runMachine() {
       { schema: ARTIFACT_SCHEMA, label: `patch:${round + 1}`, phase: 'Machine Certify' }
     )
     best = await verifyMachineCandidate(patch, inventoryText, totalCount, `patch${round + 1}`)
+  }
+
+  // ---- Tighten: squeeze a certified artifact toward the token floor, never regress ----
+  const tightenRounds = boundedInt(A.machine_tighten_rounds, 2, 0, 4)
+  for (let t = 0;
+       best && best.verification.status === 'certified' && t < tightenRounds;
+       t += 1) {
+    const tighter = await agent(
+      `Rewrite this ALREADY-CERTIFIED machine artifact into FEWER tokens using hard-telegraphic ASCII. ` +
+      `Preserve every directive, negation, condition, threshold, carve-out, and literal specific; drop only ` +
+      `words, never meaning. The artifact is NOT one line per checklist item: merge directives that share a ` +
+      `subject, section, or condition into a single compact line. Do not add directive ids, explanations, or ` +
+      `a certificate.\n\n${MACHINE_STYLE}\n${HARD_TELEGRAPHIC}\n\n` +
+      `Current artifact:\n${best.artifact}\n\n${NO_SIDE_EFFECTS}`,
+      { schema: ARTIFACT_SCHEMA, label: `tighten:${t + 1}`, phase: 'Machine Certify' }
+    )
+    const cand = await verifyMachineCandidate(tighter, inventoryText, totalCount, `tighten${t + 1}`)
+    if (cand.verification.status === 'certified' &&
+        machineTokenScore(cand.artifact) < machineTokenScore(best.artifact)) {
+      best = cand
+    } else {
+      break
+    }
   }
 
   const status = best && best.verification.missing.length === 0 && best.verification.ascii_ok

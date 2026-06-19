@@ -24,6 +24,8 @@ All notable changes to deep-distill. Format loosely follows [Keep a Changelog](h
   rule blocks instead of checklist-shaped output.
 - Machine candidate selection now uses a tokenizer-like score inside the workflow
   instead of raw character length; `measure_tokens.py` remains the authoritative gate.
+- Machine mode now adds a certified-only tighten stage that rewrites in hard-telegraphic
+  register and keeps the result only if it still certifies and scores smaller.
 
 ### Changed
 - README now presents deep-distill as a two-mode skill: human study references and

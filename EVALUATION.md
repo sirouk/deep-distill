@@ -123,7 +123,10 @@ Evaluate machine mode with this gate:
 4. **Patch loop** — restore genuine gaps and ASCII failures compactly; keep checklist
    IDs internal and fuse directives into compact rule blocks rather than mirroring the
    inventory.
-5. **Token gate** — measure source and artifact with `tiktoken` on `cl100k_base` and
+5. **Certified-only tighten loop** — once the artifact certifies, try harder
+   telegraphic rewrites and keep them only if blind reconstruction still certifies and
+   the token proxy gets smaller.
+6. **Token gate** — measure source and artifact with `tiktoken` on `cl100k_base` and
    `o200k_base`; require the artifact to be smaller and ASCII-only.
 
 The prototype that motivated this path compressed an operating-agreement-style
