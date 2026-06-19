@@ -109,7 +109,8 @@ const TOKEN_RULES =
   `token, and leading spaces often merge. Rare Unicode glyphs such as ∈, ¬, ∧, ∴, ⇒, Σ, ∏, √, and ` +
   `non-ASCII arrows often cost multiple tokens and are BANNED in machine mode. Use ASCII only. The ` +
   `reliable compression lever is deleting filler, fusing duplicates, and shortening labels without ` +
-  `dropping directives, negations, conditions, thresholds, carve-outs, or literal specifics.`
+  `dropping directives, negations, conditions, thresholds, carve-outs, or literal specifics. Do not emit ` +
+  `checklist ids such as D001/A17/01.3 in the final artifact; ids are for verification only and cost tokens.`
 
 const MACHINE_STYLE =
   `STYLE = machine-only telegraphic ASCII for LLM prompt replacement, maximum token density. ` +
@@ -118,7 +119,8 @@ const MACHINE_STYLE =
   `copulas, repeated headings, and friendly wording. Preserve every operative directive, condition, ` +
   `exception, threshold, priority, prohibition, permission, role boundary, and verbatim literal specific. ` +
   `Never delete negation or scope words: not, never, only, unless, except, before, after, even-if-asked, ` +
-  `>=, <=, exactly, at least, at most.\n${TOKEN_RULES}\n${TIERS}\n${QUALIFIER}\n${FIDELITY}`
+  `>=, <=, exactly, at least, at most. Normalize typographic punctuation to ASCII ("..." not ellipsis, "-" ` +
+  `not em dash, straight quotes not curly quotes) when preserving literal examples.\n${TOKEN_RULES}\n${TIERS}\n${QUALIFIER}\n${FIDELITY}`
 
 const INVENTORY_SCHEMA = {
   type: 'object',
@@ -187,6 +189,29 @@ function asciiOnly(s) {
   return Array.from(s || '').every(ch => ch.charCodeAt(0) < 128)
 }
 
+function normalizeAscii(s) {
+  return (s || '')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, '-')
+    .replace(/\u2026/g, '...')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[→⇒]/g, '->')
+    .replace(/[←⇐]/g, '<-')
+    .replace(/[×]/g, 'x')
+    .replace(/[≤]/g, '<=')
+    .replace(/[≥]/g, '>=')
+    .replace(/[∈]/g, ' in ')
+    .replace(/[∉]/g, ' not-in ')
+    .replace(/[¬]/g, 'not ')
+    .replace(/[∧]/g, ' and ')
+    .replace(/[∨]/g, ' or ')
+}
+
+function nonAsciiChars(s) {
+  return Array.from(new Set(Array.from(s || '').filter(ch => ch.charCodeAt(0) >= 128)))
+}
+
 function artifactOf(x) {
   if (!x) return ''
   if (typeof x === 'string') return x
@@ -199,7 +224,15 @@ function boundedInt(value, fallback, lo, hi) {
   return Math.max(lo, Math.min(Math.floor(n), hi))
 }
 
-function machineDirectiveLines(rows) {
+// Cheap tokenizer proxy used only for candidate ordering inside Workflow. The real
+// gate remains scripts/measure_tokens.py with cl100k/o200k.
+function machineTokenScore(s) {
+  return (s || '').match(/[A-Za-z0-9_]+|[^\sA-Za-z0-9_]/g)?.length || 0
+}
+
+function machineDirectiveLines(rows, opts = {}) {
+  const includeIds = opts.includeIds !== false
+  const includeLiterals = opts.includeLiterals !== false
   const out = []
   for (const row of rows) {
     const sid = row.sec.id
@@ -209,8 +242,8 @@ function machineDirectiveLines(rows) {
     for (const d of row.directives || []) {
       i += 1
       const id = d.id || `${sid}.${i}`
-      out.push(`- [${id}] ${d.text}`)
-      if (d.literal_specifics && d.literal_specifics.length) {
+      out.push(includeIds ? `- [${id}] ${d.text}` : `- ${d.text}`)
+      if (includeLiterals && d.literal_specifics && d.literal_specifics.length) {
         out.push(`  literals: ${d.literal_specifics.join(' | ')}`)
       }
     }
@@ -219,7 +252,8 @@ function machineDirectiveLines(rows) {
 }
 
 async function verifyMachineCandidate(candidate, inventoryText, totalCount, label) {
-  const artifact = artifactOf(candidate).trim()
+  const rawArtifact = artifactOf(candidate).trim()
+  const artifact = normalizeAscii(rawArtifact).trim()
   const readerProfiles = [
     'strict small-model reader: reconstruct only what is clearly recoverable',
     'obedience-oriented system-prompt reader: expand terse rules into plain directives',
@@ -257,15 +291,18 @@ async function verifyMachineCandidate(candidate, inventoryText, totalCount, labe
     { schema: VERIFY_SCHEMA, label: `judge:${label}`, phase: 'Machine Certify' }
   )
   const missing = Array.isArray(judge && judge.missing) ? judge.missing : []
+  const ascii_ok = asciiOnly(artifact)
   return {
     artifact,
+    raw_artifact: rawArtifact,
     reconstructions: recon,
     verification: {
-      status: missing.length === 0 && asciiOnly(artifact) ? 'certified' : 'needs_patch',
+      status: missing.length === 0 && ascii_ok ? 'certified' : 'needs_patch',
       total_count: totalCount,
       recovered_count: Math.max(0, totalCount - missing.length),
       missing,
-      ascii_ok: asciiOnly(artifact),
+      ascii_ok,
+      non_ascii: nonAsciiChars(artifact),
       overcompressed: (judge && judge.overcompressed) || [],
     },
   }
@@ -301,14 +338,16 @@ async function runMachine() {
     `Section directive checklist:\n${machineDirectiveLines([row])}\n\n` +
     `${MACHINE_STYLE}\n\n` +
     `Produce the shortest ASCII artifact block for this section that preserves every checklist item. ` +
-    `Prefer stable short headings/codes from the source. Fuse duplicate rules only when the fused line still ` +
-    `preserves every condition and carve-out. No Markdown flourish. No rationale. No certificate.\n\n` +
+    `Do NOT mirror the checklist. Do NOT emit directive ids like D001, A17, or 02.3. Fuse related directives ` +
+    `into compact rule lines or small rule blocks when the fused line still preserves every condition and ` +
+    `carve-out. Prefer stable short headings/codes from the source. No Markdown flourish. No rationale. No ` +
+    `certificate. ASCII only, including literal examples (normalize typographic punctuation).\n\n` +
     `${NO_SIDE_EFFECTS}`,
     { schema: ARTIFACT_SCHEMA, label: `compress-sec:${row.sec.id}`, phase: 'Compress' }
   )))
 
   const sectionText = sectionArtifacts.map((a, i) =>
-    `## ${SECTIONS[i].id} ${SECTIONS[i].title}\n${artifactOf(a).trim()}`
+    `## ${SECTIONS[i].id} ${SECTIONS[i].title}\n${normalizeAscii(artifactOf(a)).trim()}`
   ).join('\n\n')
   const levels = [
     { key: 'safe', instruction: 'Conservative: keep more words if needed; zero directive risk beats size.' },
@@ -324,7 +363,10 @@ async function runMachine() {
     `${MACHINE_STYLE}\n\n${level.instruction}\n` +
     `Global compression rules: delete duplicated headings/rationale, canonicalize repeated terms, fuse duplicate ` +
     `directives, preserve all qualifiers/literals. The artifact must stand alone: no source required, no decoder ` +
-    `key, no comments about the process, no certificate. ASCII only.\n\n${NO_SIDE_EFFECTS}`,
+    `key, no comments about the process, no certificate. CRITICAL: the artifact is NOT the checklist. Do not ` +
+    `emit D001/A17/01.3-style ids, one-line-per-directive enumerations, or section titles unless they save more ` +
+    `tokens than they cost. Write compact fused rule blocks. ASCII only; normalize em dashes, ellipses, curly ` +
+    `quotes, math arrows, and other typography to ASCII.\n\n${NO_SIDE_EFFECTS}`,
     { schema: ARTIFACT_SCHEMA, label: `compress:${level.key}`, phase: 'Compress' }
   )))
 
@@ -335,22 +377,31 @@ async function runMachine() {
 
   let best = verified
     .filter(v => v.verification.missing.length === 0 && v.verification.ascii_ok)
-    .sort((a, b) => a.artifact.length - b.artifact.length)[0] ||
+    .sort((a, b) => machineTokenScore(a.artifact) - machineTokenScore(b.artifact))[0] ||
     verified.sort((a, b) =>
       (a.verification.missing.length - b.verification.missing.length) ||
-      (a.artifact.length - b.artifact.length))[0]
+      (Number(b.verification.ascii_ok) - Number(a.verification.ascii_ok)) ||
+      (machineTokenScore(a.artifact) - machineTokenScore(b.artifact)))[0]
 
   const maxRounds = boundedInt(A.machine_patch_rounds, 3, 0, 5)
-  for (let round = 0; best && best.verification.missing.length && round < maxRounds; round += 1) {
+  for (let round = 0;
+       best && (best.verification.missing.length || !best.verification.ascii_ok) && round < maxRounds;
+       round += 1) {
     const missingText = best.verification.missing.map(m =>
       `- [${m.id}] ${m.canonical} :: ${m.issue}${m.compact_fix ? ` :: fix=${m.compact_fix}` : ''}`
     ).join('\n')
+    const asciiText = best.verification.ascii_ok
+      ? 'ASCII: PASS'
+      : `ASCII: FAIL. Replace/remove these non-ASCII chars: ${best.verification.non_ascii.join(' ')}`
     const patch = await agent(
-      `Patch this machine artifact so the missing directives become recoverable, while keeping ASCII and ` +
-      `minimum token count. Change only what is needed. Do not add a certificate or explanation.\n\n` +
+      `Patch this machine artifact so all missing directives become recoverable AND the artifact is ASCII-only, ` +
+      `while keeping minimum token count. Change only what is needed. Do not add a certificate or explanation.\n\n` +
       `Canonical checklist:\n${inventoryText}\n\n` +
       `Current artifact:\n${best.artifact}\n\n` +
-      `Missing/garbled directives to restore:\n${missingText}\n\n` +
+      `Missing/garbled directives to restore:\n${missingText || '(none)'}\n\n` +
+      `${asciiText}\n\n` +
+      `Do not add directive ids. Do not expand into a checklist. Prefer fusing nearby rules into compact blocks. ` +
+      `Normalize typography to ASCII ("..." not ellipsis, "-" not em dash, straight quotes not curly quotes). ` +
       `${MACHINE_STYLE}\n\n${NO_SIDE_EFFECTS}`,
       { schema: ARTIFACT_SCHEMA, label: `patch:${round + 1}`, phase: 'Machine Certify' }
     )
@@ -384,6 +435,7 @@ async function runMachine() {
     candidates: verified.map((v, i) => ({
       id: `cand${i + 1}`,
       chars: v.artifact.length,
+      token_score: machineTokenScore(v.artifact),
       missing: v.verification.missing.length,
       ascii_ok: v.verification.ascii_ok,
       status: v.verification.status,

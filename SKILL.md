@@ -102,10 +102,10 @@ Use machine mode when the output is for an LLM. The goal is not a prettier summa
 ### Machine Pipeline
 
 1. **Inventory** -> extract every atomic directive from each section: rule, condition, threshold, exception, carve-out, prohibition, permission, priority, literal string, path, command, variable, role boundary.
-2. **Compress** -> rewrite into terse ASCII. Delete filler and rationale. Fuse duplicates. Preserve all qualifiers and exact literals. Never use rare Unicode as shorthand.
+2. **Compress** -> rewrite into terse ASCII. Delete filler and rationale. Fuse duplicates into compact rule blocks. Preserve all qualifiers and exact literals. Never use rare Unicode as shorthand. Keep directive IDs internal; do not emit `D001`-style labels in the artifact.
 3. **Blind reconstruct** -> multiple readers receive only the compressed artifact and reconstruct the directive set.
 4. **Artifact-aware judge** -> compare the source-derived directive checklist against both the artifact text and the reconstructions. Mark missing only when genuinely absent, weakened, scope-collapsed, contradictory, or garbled.
-5. **Patch loop** -> restore missing directives compactly and repeat until zero gaps, or return `needs_patch`.
+5. **Patch loop** -> restore missing directives or ASCII failures compactly and repeat until zero gaps and ASCII pass, or return `needs_patch`.
 6. **Token gate** -> measure source vs artifact with `tiktoken` (`cl100k_base` and `o200k_base`); require the artifact to be smaller and ASCII-only.
 
 ### 1. Stage
@@ -160,7 +160,7 @@ SKILL_DIR="$HOME/.codex/skills/deep-distill"
 python3 "$SKILL_DIR/scripts/assemble.py" --mode machine --result result.json --manifest "<workspace>/manifest.json" --out "<source dir>/<name>.min.txt"
 ```
 
-The assembler refuses uncertified or non-ASCII machine artifacts by default. Use `--allow-uncertified` only to inspect a failed candidate, not to ship it.
+The assembler normalizes common typographic punctuation to ASCII, then refuses uncertified or still-non-ASCII machine artifacts by default. Use `--allow-uncertified` only to inspect a failed candidate, not to ship it.
 
 ### 4. Token Gate
 
@@ -194,6 +194,7 @@ Give the user the `.min.txt` path plus a short certificate:
 - **Mode** -> `human` vs `machine`; ask if absent.
 - **Human density** -> `telegraphic` default, `readable` on request.
 - **Machine aggressiveness** -> `machine_candidates` and `machine_patch_rounds`; never accept an artifact with any missing directives.
+- **Machine output shape** -> fuse directives into compact blocks; keep inventory/checklist IDs out of the final artifact.
 - **Granularity** -> `--section-level N`, `--chunk-words N`, `--min-chars N`; aim for enough sections that each agent can reason locally.
 - **Figures** -> human mode can tune `--dpi`, `--min-vector-drawings`, `--no-vector-figs`; machine mode defaults to `--no-figs`.
 

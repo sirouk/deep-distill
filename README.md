@@ -66,7 +66,7 @@ Machine mode is prompt compression with a verifier, not a prettier summary:
 flowchart LR
     A[Operative doc<br/>prompt · rules · policy · spec] --> B[stage_document.py --no-figs]
     B --> C[Inventory<br/>atomic directives]
-    C --> D[Compress<br/>ASCII · tokenizer-aware]
+    C --> D[Compress<br/>ASCII · fused rule blocks]
     D --> E[Blind readers<br/>reconstruct directives]
     E --> F[Artifact-aware judge<br/>artifact + reconstructions vs checklist]
     F --> G{0 missing?}
@@ -75,9 +75,9 @@ flowchart LR
     I --> J[measure_tokens.py<br/>cl100k + o200k gate]
 ```
 
-Machine mode bans rare Unicode as a fake shortcut. The lesson from the prototype work was blunt: symbols can look shorter and still cost more BPE tokens. The real win is deleting filler, fusing duplicate rules, shortening labels, and preserving every qualifier.
+Machine mode bans rare Unicode as a fake shortcut. The lesson from the prototype work was blunt: symbols can look shorter and still cost more BPE tokens. The real win is deleting filler, fusing duplicate rules into compact blocks, shortening labels, and preserving every qualifier. Checklist IDs stay inside the verifier; they are not emitted into the final prompt artifact.
 
-The verifier is deliberately blind: reader agents get only the compressed artifact, no original and no decoder key. Then a judge checks every source-derived directive against both the artifact text and the reconstructions. The artifact ships only when the missing list is empty and the token gate passes.
+The verifier is deliberately blind: reader agents get only the compressed artifact, no original and no decoder key. Then a judge checks every source-derived directive against both the artifact text and the reconstructions. The patch loop repairs missing directives and ASCII failures. The artifact ships only when the missing list is empty, ASCII passes, and the token gate passes.
 
 ---
 

@@ -120,7 +120,9 @@ Evaluate machine mode with this gate:
    and the reconstructions. Mark missing only if genuinely absent, weakened,
    scope-collapsed, contradictory, or garbled; do not chase phantom gaps caused by one
    reader under-enumerating a preserved directive.
-4. **Patch loop** — restore genuine gaps compactly and repeat until `missing = []`.
+4. **Patch loop** — restore genuine gaps and ASCII failures compactly; keep checklist
+   IDs internal and fuse directives into compact rule blocks rather than mirroring the
+   inventory.
 5. **Token gate** — measure source and artifact with `tiktoken` on `cl100k_base` and
    `o200k_base`; require the artifact to be smaller and ASCII-only.
 

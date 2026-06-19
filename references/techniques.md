@@ -44,16 +44,18 @@ functional recoverability is primary. The useful techniques shift accordingly:
    character count. Rare Unicode/logical glyphs can look compact while costing more
    BPE tokens and making the artifact less portable. Machine mode therefore bans
    non-ASCII shorthand and gets density from deleting filler, fusing duplicates, and
-   shortening labels.
+   shortening labels. Checklist IDs are verifier scaffolding only; emitting them in
+   the final artifact is usually pure token overhead.
 3. **LLMLingua-2-style reconstruction test, upgraded.** Blind readers receive only
    the compressed artifact and reconstruct the directive set. This tests whether the
    artifact is decodable without a hidden key.
 4. **Artifact-aware judging.** Score the canonical checklist against both the artifact
    text itself and the blind reconstructions. This prevents false positives where a
    reader folds a directive into a neighbor even though the artifact preserved it.
-5. **Patch until zero genuine gaps.** Unlike human distillation, where "nothing lost"
+5. **Patch until zero genuine gaps and ASCII passes.** Unlike human distillation, where "nothing lost"
    means no salient wisdom lost, machine mode demands every operative directive be
-   recoverable. If a gap remains, the artifact is `needs_patch`, not shippable.
+   recoverable. If a gap remains, or typographic punctuation survives ASCII
+   normalization, the artifact is `needs_patch`, not shippable.
 
 The machine verifier is strong practical evidence of functional equivalence, not a
 mathematical proof that every model will obey the compressed artifact identically.

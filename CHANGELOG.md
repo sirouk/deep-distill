@@ -16,6 +16,15 @@ All notable changes to deep-distill. Format loosely follows [Keep a Changelog](h
   uncertified or non-ASCII machine artifacts.
 - **`--no-figs` staging flag** for text-only machine documents.
 
+### Fixed
+- Machine-mode patching now repairs ASCII failures as well as missing directives.
+- Machine artifacts now normalize common typographic punctuation to ASCII before
+  verification/assembly.
+- Machine compression prompts now keep directive IDs internal and ask for compact fused
+  rule blocks instead of checklist-shaped output.
+- Machine candidate selection now uses a tokenizer-like score inside the workflow
+  instead of raw character length; `measure_tokens.py` remains the authoritative gate.
+
 ### Changed
 - README now presents deep-distill as a two-mode skill: human study references and
   machine prompt minification.

@@ -53,6 +53,25 @@ def ascii_only(text):
     return all(ord(ch) < 128 for ch in text)
 
 
+def normalize_ascii(text):
+    table = {
+        "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+        "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+        "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-",
+        "\u2014": "-", "\u2212": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+        "\u2192": "->", "\u21d2": "->",
+        "\u2190": "<-", "\u21d0": "<-",
+        "\u00d7": "x",
+        "\u2264": "<=", "\u2265": ">=",
+        "\u2208": " in ", "\u2209": " not-in ",
+        "\u00ac": "not ",
+        "\u2227": " and ", "\u2228": " or ",
+    }
+    return "".join(table.get(ch, ch) for ch in text)
+
+
 def load_manifest(path):
     if not path:
         return {}
@@ -95,7 +114,7 @@ def machine_certified(payload):
 
 
 def write_machine(payload, args, manifest):
-    artifact = machine_artifact(payload)
+    artifact = normalize_ascii(machine_artifact(payload))
     if not artifact.strip():
         print("ERROR: machine result has no artifact/compressed/final text.", file=sys.stderr)
         sys.exit(1)
